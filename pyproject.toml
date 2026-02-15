@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "multi-agents-poc-maf"
+version = "0.1.0"
+description = "Multi-agent group chat POC using Microsoft Agent Framework with Slack, Jira, and GitHub MCP tools"
+requires-python = ">=3.10"
+dependencies = [
+    "agent-framework>=1.0.0b260212",
+    "agent-framework-azure-ai>=1.0.0b260212",
+    "agent-framework-orchestrations>=1.0.0b260212",
+    "azure-identity>=1.17.0",
+    "azure-ai-projects>=2.0.0b3",
+    "python-dotenv>=1.0.0",
+    "httpx>=0.27.0",
+    "mcp>=1.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23.0",
+    "ruff>=0.5.0",
+]
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"

@@ -1,0 +1,80 @@
+kind: Workflow
+trigger:
+  kind: OnConversationStart
+  id: group_chat_workflow
+  actions:
+    - kind: SetVariable
+      id: init_done
+      variable: Local.IsDone
+      value: false
+
+    - kind: SetVariable
+      id: init_round
+      variable: Local.Round
+      value: 0
+
+    # Orchestrator decides which agent to invoke next
+    - kind: InvokeAzureAgent
+      id: invoke_orchestrator
+      displayName: Orchestrator
+      agent:
+        name: Orchestrator
+      conversationId: =System.ConversationId
+      output:
+        messages: Local.OrchestratorResponse
+
+    # Route to the selected sub-agent using MessageText() to extract text from messages
+    - kind: ConditionGroup
+      id: route_to_agent
+      displayName: Route to sub-agent
+      conditions:
+        - condition: =Not(IsBlank(Find("SlackAgent", MessageText(Local.OrchestratorResponse))))
+          id: slack_route
+          actions:
+            - kind: InvokeAzureAgent
+              id: invoke_slack
+              displayName: Slack Agent
+              agent:
+                name: SlackAgent
+              conversationId: =System.ConversationId
+
+        - condition: =Not(IsBlank(Find("JiraAgent", MessageText(Local.OrchestratorResponse))))
+          id: jira_route
+          actions:
+            - kind: InvokeAzureAgent
+              id: invoke_jira
+              displayName: Jira Agent
+              agent:
+                name: JiraAgent
+              conversationId: =System.ConversationId
+
+        - condition: =Not(IsBlank(Find("GitHubAgent", MessageText(Local.OrchestratorResponse))))
+          id: github_route
+          actions:
+            - kind: InvokeAzureAgent
+              id: invoke_github
+              displayName: GitHub Agent
+              agent:
+                name: GitHubAgent
+              conversationId: =System.ConversationId
+
+      elseActions:
+        - kind: SetVariable
+          id: mark_done
+          variable: Local.IsDone
+          value: true
+
+    # Increment round counter
+    - kind: SetVariable
+      id: inc_round
+      variable: Local.Round
+      value: =Local.Round + 1
+
+    # Loop back if not done and under max rounds
+    - kind: If
+      id: check_loop
+      condition: =And(Not(Local.IsDone), Local.Round < 10)
+      actions:
+        - kind: GotoAction
+          id: loop_back
+          actionId: invoke_orchestrator
