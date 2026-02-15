@@ -13,6 +13,10 @@ urlFragment: multi-agents-poc-maf
 ---
 -->
 
+<p align="center">
+  <img src="https://www.i-programmer.info/images/stories/News/2025/Oct/B/ms_agent_fk_banner.JPG" alt="Microsoft Agent Framework Banner" width="100%"/>
+</p>
+
 # Multi-Agent Group Chat using Microsoft Agent Framework
 
 <p align="center">
