@@ -20,7 +20,7 @@ urlFragment: multi-agents-poc-maf
   &nbsp;&nbsp;&nbsp;
   <img src="https://img.icons8.com/fluency/96/azure-1.png" alt="Azure" width="80"/>
   &nbsp;&nbsp;&nbsp;
-  <img src="https://cdn-dynmedia-1.microsoft.com/is/content/microsoftcorp/aifoundry-icon-nobg" alt="Azure AI Foundry" width="80"/>
+  <img src="https://devblogs.microsoft.com/foundry/wp-content/uploads/sites/89/2025/03/ai-foundry.png" alt="Azure AI Foundry" width="80"/>
 </p>
 
 <p align="center">
@@ -33,6 +33,12 @@ urlFragment: multi-agents-poc-maf
 A multi-agent group chat system built with the [Microsoft Agent Framework](https://github.com/microsoft/agent-framework) SDK. An **Orchestrator** agent intelligently routes user requests to specialized tool agents — **Slack**, **Jira**, and **GitHub** — each backed by a remote [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server.
 
 The system supports both **local development** and **cloud deployment** as a hosted workflow on [Azure AI Foundry](https://ai.azure.com).
+
+<p align="center">
+  <img src="assets/demo-output.png" alt="Azure AI Foundry Workflow Demo" width="900"/>
+</p>
+
+<p align="center"><em>The multi-agent workflow running in Azure AI Foundry — the Orchestrator routes a user query to the JiraAgent, which returns matching Jira issues via MCP.</em></p>
 
 ## Table of Contents
 
