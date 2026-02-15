@@ -15,9 +15,20 @@ urlFragment: multi-agents-poc-maf
 
 # Multi-Agent Group Chat using Microsoft Agent Framework
 
-[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Azure AI Foundry](https://img.shields.io/badge/Azure%20AI-Foundry-0078D4?logo=microsoft-azure)](https://ai.azure.com)
+<p align="center">
+  <img src="https://img.icons8.com/fluency/96/microsoft.png" alt="Microsoft" width="80"/>
+  &nbsp;&nbsp;&nbsp;
+  <img src="https://img.icons8.com/fluency/96/azure-1.png" alt="Azure" width="80"/>
+  &nbsp;&nbsp;&nbsp;
+  <img src="https://cdn-dynmedia-1.microsoft.com/is/content/microsoftcorp/aifoundry-icon-nobg" alt="Azure AI Foundry" width="80"/>
+</p>
+
+<p align="center">
+  <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.10+-blue.svg" alt="Python 3.10+"></a>
+  <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
+  <a href="https://ai.azure.com"><img src="https://img.shields.io/badge/Azure%20AI-Foundry-0078D4?logo=microsoft-azure" alt="Azure AI Foundry"></a>
+  <a href="https://github.com/microsoft/agent-framework"><img src="https://img.shields.io/badge/Microsoft-Agent%20Framework-5C2D91?logo=microsoft" alt="Microsoft Agent Framework"></a>
+</p>
 
 A multi-agent group chat system built with the [Microsoft Agent Framework](https://github.com/microsoft/agent-framework) SDK. An **Orchestrator** agent intelligently routes user requests to specialized tool agents — **Slack**, **Jira**, and **GitHub** — each backed by a remote [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server.
 
