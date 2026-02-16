@@ -23,6 +23,7 @@ import argparse
 import json
 import os
 import sys
+import time
 from pathlib import Path
 from pprint import pprint
 
@@ -70,25 +71,35 @@ def get_all_tool_definitions(tool_defs: dict[str, list[dict]]) -> list[dict]:
 
 
 def get_model_config() -> dict:
-    """Build model config dict for evaluators."""
+    """Build model config dict for evaluators.
+
+    Prefers AZURE_OPENAI_CHAT_DEPLOYMENT_NAME (the actual deployment in
+    the Azure OpenAI resource), falling back to AZURE_AI_MODEL_DEPLOYMENT_NAME.
+    """
+    deployment = (
+        os.environ.get("AZURE_OPENAI_CHAT_DEPLOYMENT_NAME")
+        or os.environ.get("AZURE_AI_MODEL_DEPLOYMENT_NAME")
+        or "gpt-4o"
+    )
     return {
         "azure_endpoint": os.environ["AZURE_OPENAI_ENDPOINT"],
         "api_key": os.environ["AZURE_OPENAI_API_KEY"],
-        "azure_deployment": os.environ.get("AZURE_AI_MODEL_DEPLOYMENT_NAME", "gpt-4o-mini"),
+        "azure_deployment": deployment,
         "api_version": os.environ.get("AZURE_OPENAI_API_VERSION", "2025-01-01-preview"),
     }
 
 
-def get_azure_ai_project() -> dict | None:
-    """Build Azure AI project scope for logging results to Foundry."""
+def get_azure_ai_project() -> str | None:
+    """Return the Azure AI project endpoint for logging results to Foundry.
+
+    The ``evaluate()`` function in azure-ai-evaluation >= 1.5 accepts the
+    project endpoint URL directly as a string, which avoids the need to
+    resolve the underlying ML workspace triad (subscription / resource group
+    / workspace name).  Format:
+        https://{resource_name}.services.ai.azure.com/api/projects/{project_name}
+    """
     endpoint = os.environ.get("AZURE_AI_PROJECT_ENDPOINT", "")
-    if not endpoint:
-        return None
-    return {
-        "subscription_id": os.environ.get("AZURE_SUBSCRIPTION_ID", ""),
-        "resource_group_name": os.environ.get("AZURE_RESOURCE_GROUP", ""),
-        "project_name": os.environ.get("AZURE_AI_PROJECT_NAME", ""),
-    }
+    return endpoint or None
 
 
 # ---------------------------------------------------------------------------
@@ -173,12 +184,13 @@ def evaluate_tool_calls(dataset: list[dict], tool_defs: dict[str, list[dict]], m
             continue
 
         # Build synthetic tool_calls in the format the evaluator expects
+        expected_args = row.get("expected_arguments", [])
         tool_calls = [
             {
                 "type": "tool_call",
                 "tool_call_id": f"call_{j}",
                 "name": tool_name,
-                "arguments": {},
+                "arguments": expected_args[j] if j < len(expected_args) else {},
             }
             for j, tool_name in enumerate(expected_tools)
         ]
@@ -211,6 +223,8 @@ def evaluate_tool_calls(dataset: list[dict], tool_defs: dict[str, list[dict]], m
                     "_error": str(e),
                 }
             )
+        # Brief pause between rows to avoid rate-limit (429) errors
+        time.sleep(1)
 
     # Aggregate
     scores = [r.get("tool_call_accuracy", 0) for r in results if "tool_call_accuracy" in r]
@@ -239,11 +253,14 @@ def run_batch_evaluation(
     model_config: dict,
     log_to_foundry: bool = False,
 ) -> dict:
-    """Run batch evaluation using azure.ai.evaluation.evaluate().
+    """Run both evaluators and optionally log to Foundry.
 
-    This creates a JSONL with all required columns and uses evaluate()
-    to run IntentResolutionEvaluator and ToolCallAccuracyEvaluator in
-    batch mode.  Results can optionally be logged to Azure AI Foundry.
+    IntentResolutionEvaluator runs via the SDK ``evaluate()`` function
+    (supports JSONL with string columns and Foundry logging).
+
+    ToolCallAccuracyEvaluator runs per-row because it requires complex
+    types (lists of dicts) that cannot be serialized through JSONL
+    column mapping.
     """
     from azure.ai.evaluation import (
         IntentResolutionEvaluator,
@@ -253,53 +270,31 @@ def run_batch_evaluation(
 
     all_tool_defs = get_all_tool_definitions(tool_defs)
 
-    # Prepare enriched data for batch evaluation
+    # --- Intent Resolution via evaluate() (supports Foundry logging) ---
     batch_data = []
     for row in dataset:
-        expected_tools = row.get("expected_tools", [])
-        expected_agent = row.get("expected_agent", "")
-        tool_calls = [
-            {"type": "tool_call", "tool_call_id": f"call_{j}", "name": t, "arguments": {}}
-            for j, t in enumerate(expected_tools)
-        ]
-
         batch_data.append(
             {
                 "query": row["query"],
-                "response": expected_agent,  # orchestrator's expected routing response
-                "tool_calls": json.dumps(tool_calls),
-                "tool_definitions": json.dumps(tool_defs.get(expected_agent, all_tool_defs)),
-                "expected_agent": expected_agent,
-                "category": row.get("category", ""),
+                "response": row.get("expected_agent", ""),
             }
         )
 
-    # Write temp JSONL for evaluate()
     batch_path = EVAL_DIR / "_batch_data.jsonl"
     with open(batch_path, "w") as f:
         for item in batch_data:
             f.write(json.dumps(item) + "\n")
 
-    evaluators = {
-        "intent_resolution": IntentResolutionEvaluator(model_config=model_config),
-        "tool_call_accuracy": ToolCallAccuracyEvaluator(model_config=model_config),
-    }
-
     evaluate_kwargs: dict = {
         "data": str(batch_path),
-        "evaluators": evaluators,
+        "evaluators": {
+            "intent_resolution": IntentResolutionEvaluator(model_config=model_config),
+        },
         "evaluator_config": {
             "intent_resolution": {
                 "column_mapping": {
                     "query": "${data.query}",
                     "response": "${data.response}",
-                },
-            },
-            "tool_call_accuracy": {
-                "column_mapping": {
-                    "query": "${data.query}",
-                    "tool_calls": "${data.tool_calls}",
-                    "tool_definitions": "${data.tool_definitions}",
                 },
             },
         },
@@ -310,17 +305,71 @@ def run_batch_evaluation(
         project = get_azure_ai_project()
         if project:
             evaluate_kwargs["azure_ai_project"] = project
-            print("Logging results to Azure AI Foundry project.")
+            print("  Logging results to Azure AI Foundry project.")
         else:
-            print("Warning: AZURE_AI_PROJECT_ENDPOINT not set; skipping Foundry logging.")
+            print("  Warning: AZURE_AI_PROJECT_ENDPOINT not set; skipping Foundry logging.")
 
-    print("\nRunning batch evaluation...")
-    result = evaluate(**evaluate_kwargs)
-
-    # Clean up temp file
+    print("\n[1/2] Running IntentResolutionEvaluator (batch)...")
+    intent_result = evaluate(**evaluate_kwargs)
     batch_path.unlink(missing_ok=True)
 
-    return result
+    # --- Tool Call Accuracy (per-row) ---
+    print("\n[2/2] Running ToolCallAccuracyEvaluator (per-row)...")
+    tool_evaluator = ToolCallAccuracyEvaluator(model_config=model_config)
+    tool_results = []
+
+    for i, row in enumerate(dataset):
+        expected_tools = row.get("expected_tools", [])
+        expected_agent = row.get("expected_agent", "")
+        if not expected_tools:
+            continue
+
+        expected_args = row.get("expected_arguments", [])
+        tool_calls = [
+            {
+                "type": "tool_call",
+                "tool_call_id": f"call_{j}",
+                "name": t,
+                "arguments": expected_args[j] if j < len(expected_args) else {},
+            }
+            for j, t in enumerate(expected_tools)
+        ]
+        agent_tool_defs = tool_defs.get(expected_agent, all_tool_defs)
+
+        try:
+            result = tool_evaluator(
+                query=row["query"],
+                tool_calls=tool_calls,
+                tool_definitions=agent_tool_defs,
+            )
+            status = result.get("tool_call_accuracy_result", "?")
+            score = result.get("tool_call_accuracy", "?")
+            print(
+                f"  [{i + 1:02d}/{len(dataset)}] {status:4s} (score={score}) | {expected_agent:12s} | {row['query'][:60]}"
+            )
+            tool_results.append(result)
+        except Exception as e:
+            print(f"  [{i + 1:02d}/{len(dataset)}] ERROR | {expected_agent:12s} | {row['query'][:60]} — {e}")
+            tool_results.append({"_error": str(e)})
+        # Brief pause between rows to avoid rate-limit (429) errors
+        time.sleep(1)
+
+    # Aggregate tool call results
+    tool_scores = [r.get("tool_call_accuracy", 0) for r in tool_results if "tool_call_accuracy" in r]
+    tool_passes = sum(1 for r in tool_results if r.get("tool_call_accuracy_result") == "pass")
+    tool_total = len(tool_scores)
+
+    return {
+        "intent_resolution": intent_result,
+        "tool_call_accuracy": {
+            "total": len(dataset),
+            "evaluated": tool_total,
+            "passed": tool_passes,
+            "failed": tool_total - tool_passes,
+            "pass_rate": round(tool_passes / tool_total, 3) if tool_total else 0,
+            "avg_score": round(sum(tool_scores) / tool_total, 2) if tool_total else 0,
+        },
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -377,11 +426,24 @@ def main():
     if args.batch:
         result = run_batch_evaluation(dataset, tool_defs, model_config, args.log_to_foundry)
         print("\n" + "=" * 60)
-        print("BATCH EVALUATION RESULTS")
+        print("EVALUATION RESULTS")
         print("=" * 60)
-        pprint(result.get("metrics", {}))
-        if "studio_url" in result:
-            print(f"\nView in Foundry: {result['studio_url']}")
+
+        # Intent resolution (from evaluate())
+        intent = result.get("intent_resolution", {})
+        if hasattr(intent, "get"):
+            metrics = intent.get("metrics", {})
+            if metrics:
+                print("\nIntent Resolution:")
+                pprint(metrics)
+            if "studio_url" in intent:
+                print(f"\nView in Foundry: {intent['studio_url']}")
+
+        # Tool call accuracy (aggregated)
+        tool = result.get("tool_call_accuracy", {})
+        if tool:
+            print("\nTool Call Accuracy:")
+            pprint(tool)
         return
 
     # Run individual evaluators
