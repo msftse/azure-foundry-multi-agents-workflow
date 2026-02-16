@@ -21,6 +21,7 @@ dependencies = [
 [project.optional-dependencies]
 eval = [
     "azure-ai-evaluation>=1.0.0",
+    "azure-ai-projects>=2.0.0b1",
 ]
 dev = [
     "pytest>=8.0",

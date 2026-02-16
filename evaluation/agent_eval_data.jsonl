@@ -1,0 +1,40 @@
+{"query": "List all my Slack channels"}
+{"query": "Send a message to #general saying hello team"}
+{"query": "Search for messages about deployment in Slack"}
+{"query": "What are the recent messages in the #engineering channel?"}
+{"query": "Show me the thread replies on a message in #incidents"}
+{"query": "Post a status update to the #standup channel: Sprint 5 completed all items"}
+{"query": "Find all Slack messages from last week mentioning 'outage'"}
+{"query": "Which Slack channels am I a member of?"}
+{"query": "Get the conversation history from the #dev-ops channel"}
+{"query": "Send a reminder to #team-leads about the 3pm meeting"}
+{"query": "What Jira projects do we have?"}
+{"query": "Search for all open bugs assigned to me in Jira"}
+{"query": "Show me the details of Jira issue SMS-42"}
+{"query": "What are the active sprints for the SMS project?"}
+{"query": "List all statuses available in our Jira instance"}
+{"query": "Get the comments on Jira issue SMS-1"}
+{"query": "What are the priority levels in Jira?"}
+{"query": "Show me the worklogs for issue SMS-3"}
+{"query": "List all boards in our Jira instance"}
+{"query": "What transitions are available for issue SMS-5?"}
+{"query": "Find all Jira issues created this week with high priority"}
+{"query": "Get project details for the SMS project in Jira"}
+{"query": "List my GitHub repositories"}
+{"query": "Show me open issues on the repo msftse/remote-mcp-apim-functions-python"}
+{"query": "What are the open pull requests on Azure-Samples/remote-mcp-apim-functions-python?"}
+{"query": "Search for code containing 'MCP' across GitHub"}
+{"query": "Get the README file from the repo github/github-mcp-server"}
+{"query": "Create an issue titled 'Bug: login fails' on my repo roy2392/my-project"}
+{"query": "Show me the recent commits on the main branch of msftse/remote-mcp-apim-functions-python"}
+{"query": "Get details of pull request #5 on repo roy2392/my-project"}
+{"query": "List the files changed in PR #10 on Azure-Samples/remote-mcp-apim-functions-python"}
+{"query": "Search for GitHub users named 'royzalta'"}
+{"query": "Create a new branch called 'feature/eval' in repo msftse/remote-mcp-apim-functions-python"}
+{"query": "Find open issues and PRs mentioning 'MCP' across all GitHub repos"}
+{"query": "List Jira projects then list Slack channels"}
+{"query": "Find open Jira bugs and post a summary to Slack #engineering"}
+{"query": "Check my GitHub PRs and then search for related Jira issues"}
+{"query": "List my Slack channels then show my GitHub repos"}
+{"query": "Get the sprint status from Jira and post it to Slack #standup"}
+{"query": "Search GitHub for MCP repos and create Jira tickets for the top results"}

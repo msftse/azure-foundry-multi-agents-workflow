@@ -56,6 +56,7 @@ The system supports both **local development** and **cloud deployment** as a hos
   - [Local Mode](#local-mode)
   - [Azure AI Foundry Deployment](#azure-ai-foundry-deployment)
   - [GitHub MCP Connection Setup](#github-mcp-connection-setup)
+- [CI/CD](#cicd)
 - [Evaluation](#evaluation)
 - [Key Design Decisions](#key-design-decisions)
 - [Known Limitations](#known-limitations)
@@ -116,9 +117,13 @@ GitHub uses the hosted [GitHub Copilot MCP endpoint](https://docs.github.com/en/
 ├── pyproject.toml                 # Project metadata and dependencies
 ├── .env.example                   # Environment variable template
 │
+├── .github/workflows/
+│   └── ci-cd.yml                  # GitHub Actions: lint → deploy → evaluate
+│
 ├── evaluation/                    # Agent evaluation suite
-│   ├── run_evaluation.py          # Evaluation runner (routing + tool call accuracy)
-│   ├── evaluation_data.jsonl      # 40 test cases across all agents
+│   ├── run_evaluation.py          # Agent target evaluation runner
+│   ├── agent_eval_data.jsonl      # 40 query-only test cases for live eval
+│   ├── evaluation_data.jsonl      # Full test cases with expected agents & tools
 │   └── tool_definitions.json      # MCP tool schemas for all agents
 │
 ├── pipeline/                      # Azure AI Foundry deployment
@@ -258,14 +263,55 @@ az rest --method put \
 
 > **Note:** The `project_connection_id` field in the native MCP tool definition takes the connection **name** (e.g., `github-mcp-pat`), not the full ARM resource ID.
 
+## CI/CD
+
+The repository includes a GitHub Actions pipeline (`.github/workflows/ci-cd.yml`) that runs on every push to `main`:
+
+```
+Lint  ──>  Deploy to Foundry  ──>  Evaluate Workflow
+```
+
+| Stage | What it does |
+|-------|-------------|
+| **Lint** | Runs `ruff check` and `ruff format --check` |
+| **Deploy** | Registers agents & workflow in Foundry, deploys via ARM API, runs a smoke test |
+| **Evaluate** | Sends 40 queries to the live `MultiAgentGroupChat` agent and evaluates with built-in evaluators. Results appear under the workflow's **Evaluation** tab in the Foundry portal. |
+
+### Required GitHub Secrets
+
+Configure these in **Settings > Secrets and variables > Actions**:
+
+| Secret | Description |
+|--------|-------------|
+| `AZURE_CLIENT_ID` | Service principal client ID (for OIDC login) |
+| `AZURE_TENANT_ID` | Azure AD tenant ID |
+| `AZURE_SUBSCRIPTION_ID` | Azure subscription ID |
+| `AZURE_AI_PROJECT_ENDPOINT` | Foundry project endpoint (`https://<account>.services.ai.azure.com/api/projects/<project>`) |
+| `AZURE_OPENAI_ENDPOINT` | Azure OpenAI resource endpoint |
+| `AZURE_OPENAI_API_KEY` | Azure OpenAI API key |
+| `AZURE_OPENAI_CHAT_DEPLOYMENT_NAME` | Model deployment name (e.g. `gpt-4o`) |
+| `AZURE_AI_MODEL_DEPLOYMENT_NAME` | Foundry model deployment name |
+| `AZURE_RESOURCE_GROUP` | General resource group |
+| `AZURE_AI_RESOURCE_GROUP` | Resource group containing the Foundry project |
+| `AZURE_AI_PROJECT_NAME` | Foundry project name |
+| `SLACK_MCP_SSE_URL` | APIM-hosted Slack MCP SSE endpoint |
+| `JIRA_MCP_SSE_URL` | APIM-hosted Jira MCP SSE endpoint |
+| `GH_PAT` | GitHub Personal Access Token for MCP auth |
+| `GITHUB_MCP_URL` | GitHub Copilot MCP endpoint |
+
+### Manual trigger
+
+You can also trigger the pipeline manually via **Actions > CI/CD > Run workflow**, with an option to skip the evaluation step.
+
 ## Evaluation
 
-The project includes an evaluation suite that uses the [Azure AI Evaluation SDK](https://learn.microsoft.com/azure/ai-foundry/how-to/develop/agent-evaluate-sdk) to measure agent quality:
+The project includes an evaluation suite that sends queries to the live **MultiAgentGroupChat** workflow agent and evaluates its responses using the [Foundry cloud evaluation API](https://learn.microsoft.com/azure/ai-foundry/how-to/develop/cloud-evaluation?view=foundry). Results appear under the workflow's **Evaluation** tab in the Foundry portal.
 
 | Evaluator | What it measures |
 |-----------|-----------------|
-| `IntentResolutionEvaluator` | Does the Orchestrator correctly identify user intent and route to the right agent? |
-| `ToolCallAccuracyEvaluator` | Does the sub-agent select the correct MCP tools for the query? |
+| `intent_resolution` | Does the agent correctly identify user intent and produce a meaningful response? |
+| `tool_call_accuracy` | Does the agent select the correct MCP tools for the query? |
+| `task_adherence` | Does the agent's response adhere to its assigned tasks? |
 
 ### Install evaluation dependencies
 
@@ -276,42 +322,30 @@ pip install -e ".[eval]"
 ### Run evaluations
 
 ```bash
-# Orchestrator routing + tool call accuracy (individual evaluators)
 python -m evaluation.run_evaluation
-
-# Orchestrator routing only
-python -m evaluation.run_evaluation --routing-only
-
-# Tool call accuracy only
-python -m evaluation.run_evaluation --tool-calls-only
-
-# Batch mode using SDK evaluate() function
-python -m evaluation.run_evaluation --batch
-
-# Log results to Azure AI Foundry
-python -m evaluation.run_evaluation --batch --log-to-foundry
 ```
+
+This sends each query to the live agent, collects responses (including tool calls), and evaluates them. The run is asynchronous in Azure — the script polls for completion and prints a summary.
 
 ### Evaluation dataset
 
-The dataset (`evaluation/evaluation_data.jsonl`) contains 40 test cases across four categories:
+The dataset (`evaluation/agent_eval_data.jsonl`) contains 40 queries across four categories:
 
 | Category | Count | Description |
 |----------|-------|-------------|
-| Slack routing | 10 | Queries that should route to SlackAgent |
-| Jira routing | 12 | Queries that should route to JiraAgent |
-| GitHub routing | 12 | Queries that should route to GitHubAgent |
+| Slack | 10 | Queries that should route to SlackAgent |
+| Jira | 12 | Queries that should route to JiraAgent |
+| GitHub | 12 | Queries that should route to GitHubAgent |
 | Multi-agent | 6 | Multi-step queries testing first-hop routing |
-
-Each test case specifies the expected agent and expected tool calls, enabling automated accuracy measurement.
 
 ### Evaluation files
 
 | File | Description |
 |------|-------------|
-| `evaluation/evaluation_data.jsonl` | Test dataset with queries, expected agents, and expected tools |
-| `evaluation/tool_definitions.json` | Full tool schemas for all three MCP servers |
-| `evaluation/run_evaluation.py` | Evaluation runner script |
+| `evaluation/agent_eval_data.jsonl` | Query-only dataset (agent generates responses at runtime) |
+| `evaluation/evaluation_data.jsonl` | Full dataset with expected agents, tools, and arguments |
+| `evaluation/tool_definitions.json` | MCP tool schemas for all three agents |
+| `evaluation/run_evaluation.py` | Agent target evaluation runner |
 
 ## Key Design Decisions
 
