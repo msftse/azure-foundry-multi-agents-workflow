@@ -283,21 +283,20 @@ Configure these in **Settings > Secrets and variables > Actions**:
 
 | Secret | Description |
 |--------|-------------|
-| `AZURE_CLIENT_ID` | Service principal client ID (for OIDC login) |
-| `AZURE_TENANT_ID` | Azure AD tenant ID |
-| `AZURE_SUBSCRIPTION_ID` | Azure subscription ID |
+| `AZURE_CREDENTIALS` | Service principal JSON (from `az ad sp create-for-rbac --json-auth`) |
 | `AZURE_AI_PROJECT_ENDPOINT` | Foundry project endpoint (`https://<account>.services.ai.azure.com/api/projects/<project>`) |
 | `AZURE_OPENAI_ENDPOINT` | Azure OpenAI resource endpoint |
 | `AZURE_OPENAI_API_KEY` | Azure OpenAI API key |
 | `AZURE_OPENAI_CHAT_DEPLOYMENT_NAME` | Model deployment name (e.g. `gpt-4o`) |
 | `AZURE_AI_MODEL_DEPLOYMENT_NAME` | Foundry model deployment name |
+| `AZURE_SUBSCRIPTION_ID` | Azure subscription ID |
 | `AZURE_RESOURCE_GROUP` | General resource group |
 | `AZURE_AI_RESOURCE_GROUP` | Resource group containing the Foundry project |
 | `AZURE_AI_PROJECT_NAME` | Foundry project name |
 | `SLACK_MCP_SSE_URL` | APIM-hosted Slack MCP SSE endpoint |
 | `JIRA_MCP_SSE_URL` | APIM-hosted Jira MCP SSE endpoint |
 | `GH_PAT` | GitHub Personal Access Token for MCP auth |
-| `GITHUB_MCP_URL` | GitHub Copilot MCP endpoint |
+| `GH_MCP_URL` | GitHub Copilot MCP endpoint |
 
 ### Manual trigger
 

@@ -13,7 +13,6 @@ on:
         default: false
 
 permissions:
-  id-token: write   # OIDC for Azure login
   contents: read
 
 env:
@@ -46,6 +45,20 @@ jobs:
     needs: lint
     runs-on: ubuntu-latest
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    env:
+      AZURE_AI_PROJECT_ENDPOINT: ${{ secrets.AZURE_AI_PROJECT_ENDPOINT }}
+      AZURE_OPENAI_ENDPOINT: ${{ secrets.AZURE_OPENAI_ENDPOINT }}
+      AZURE_OPENAI_API_KEY: ${{ secrets.AZURE_OPENAI_API_KEY }}
+      AZURE_OPENAI_CHAT_DEPLOYMENT_NAME: ${{ secrets.AZURE_OPENAI_CHAT_DEPLOYMENT_NAME }}
+      AZURE_AI_MODEL_DEPLOYMENT_NAME: ${{ secrets.AZURE_AI_MODEL_DEPLOYMENT_NAME }}
+      AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      AZURE_RESOURCE_GROUP: ${{ secrets.AZURE_RESOURCE_GROUP }}
+      AZURE_AI_RESOURCE_GROUP: ${{ secrets.AZURE_AI_RESOURCE_GROUP }}
+      AZURE_AI_PROJECT_NAME: ${{ secrets.AZURE_AI_PROJECT_NAME }}
+      SLACK_MCP_SSE_URL: ${{ secrets.SLACK_MCP_SSE_URL }}
+      JIRA_MCP_SSE_URL: ${{ secrets.JIRA_MCP_SSE_URL }}
+      GITHUB_PERSONAL_ACCESS_TOKEN: ${{ secrets.GH_PAT }}
+      GITHUB_MCP_URL: ${{ secrets.GH_MCP_URL }}
     steps:
       - uses: actions/checkout@v4
 
@@ -56,44 +69,15 @@ jobs:
       - name: Install dependencies
         run: pip install -e ".[eval]"
 
-      - name: Azure Login (OIDC)
+      - name: Azure CLI login
         uses: azure/login@v2
         with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-      - name: Register agents & workflow
-        env:
-          AZURE_AI_PROJECT_ENDPOINT: ${{ secrets.AZURE_AI_PROJECT_ENDPOINT }}
-          AZURE_OPENAI_ENDPOINT: ${{ secrets.AZURE_OPENAI_ENDPOINT }}
-          AZURE_OPENAI_API_KEY: ${{ secrets.AZURE_OPENAI_API_KEY }}
-          AZURE_OPENAI_CHAT_DEPLOYMENT_NAME: ${{ secrets.AZURE_OPENAI_CHAT_DEPLOYMENT_NAME }}
-          AZURE_AI_MODEL_DEPLOYMENT_NAME: ${{ secrets.AZURE_AI_MODEL_DEPLOYMENT_NAME }}
-          AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-          AZURE_RESOURCE_GROUP: ${{ secrets.AZURE_RESOURCE_GROUP }}
-          AZURE_AI_RESOURCE_GROUP: ${{ secrets.AZURE_AI_RESOURCE_GROUP }}
-          AZURE_AI_PROJECT_NAME: ${{ secrets.AZURE_AI_PROJECT_NAME }}
-          SLACK_MCP_SSE_URL: ${{ secrets.SLACK_MCP_SSE_URL }}
-          JIRA_MCP_SSE_URL: ${{ secrets.JIRA_MCP_SSE_URL }}
-          GITHUB_PERSONAL_ACCESS_TOKEN: ${{ secrets.GH_PAT }}
-          GITHUB_MCP_URL: ${{ secrets.GITHUB_MCP_URL }}
+      - name: Register agents & deploy workflow
         run: python -m pipeline.publish --deploy
 
       - name: Verify deployment
-        env:
-          AZURE_AI_PROJECT_ENDPOINT: ${{ secrets.AZURE_AI_PROJECT_ENDPOINT }}
-          AZURE_OPENAI_ENDPOINT: ${{ secrets.AZURE_OPENAI_ENDPOINT }}
-          AZURE_OPENAI_API_KEY: ${{ secrets.AZURE_OPENAI_API_KEY }}
-          AZURE_OPENAI_CHAT_DEPLOYMENT_NAME: ${{ secrets.AZURE_OPENAI_CHAT_DEPLOYMENT_NAME }}
-          AZURE_AI_MODEL_DEPLOYMENT_NAME: ${{ secrets.AZURE_AI_MODEL_DEPLOYMENT_NAME }}
-          AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-          AZURE_RESOURCE_GROUP: ${{ secrets.AZURE_RESOURCE_GROUP }}
-          AZURE_AI_RESOURCE_GROUP: ${{ secrets.AZURE_AI_RESOURCE_GROUP }}
-          AZURE_AI_PROJECT_NAME: ${{ secrets.AZURE_AI_PROJECT_NAME }}
-          SLACK_MCP_SSE_URL: ${{ secrets.SLACK_MCP_SSE_URL }}
-          JIRA_MCP_SSE_URL: ${{ secrets.JIRA_MCP_SSE_URL }}
-          GITHUB_PERSONAL_ACCESS_TOKEN: ${{ secrets.GH_PAT }}
         run: python -m pipeline.publish --verify
 
   # ─── Stage 3: Evaluate the deployed workflow ───────────────
@@ -104,6 +88,11 @@ jobs:
     if: |
       (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
       && !(github.event.inputs.skip_eval == 'true')
+    env:
+      AZURE_AI_PROJECT_ENDPOINT: ${{ secrets.AZURE_AI_PROJECT_ENDPOINT }}
+      AZURE_OPENAI_ENDPOINT: ${{ secrets.AZURE_OPENAI_ENDPOINT }}
+      AZURE_OPENAI_API_KEY: ${{ secrets.AZURE_OPENAI_API_KEY }}
+      AZURE_OPENAI_CHAT_DEPLOYMENT_NAME: ${{ secrets.AZURE_OPENAI_CHAT_DEPLOYMENT_NAME }}
     steps:
       - uses: actions/checkout@v4
 
@@ -114,18 +103,12 @@ jobs:
       - name: Install dependencies
         run: pip install -e ".[eval]"
 
-      - name: Azure Login (OIDC)
+      - name: Azure CLI login
         uses: azure/login@v2
         with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
 
       - name: Run agent evaluation
-        env:
-          AZURE_AI_PROJECT_ENDPOINT: ${{ secrets.AZURE_AI_PROJECT_ENDPOINT }}
-          AZURE_OPENAI_ENDPOINT: ${{ secrets.AZURE_OPENAI_ENDPOINT }}
-          AZURE_OPENAI_CHAT_DEPLOYMENT_NAME: ${{ secrets.AZURE_OPENAI_CHAT_DEPLOYMENT_NAME }}
         run: python -m evaluation.run_evaluation
 
       - name: Upload evaluation results
