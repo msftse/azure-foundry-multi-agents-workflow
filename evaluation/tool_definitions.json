@@ -1,0 +1,512 @@
+{
+  "SlackAgent": [
+    {
+      "name": "slack_list_channels",
+      "description": "List all Slack channels the bot is a member of, including channel ID, name, and topic.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer",
+            "description": "Maximum number of channels to return."
+          },
+          "cursor": {
+            "type": "string",
+            "description": "Pagination cursor for next page of results."
+          }
+        }
+      }
+    },
+    {
+      "name": "slack_post_message",
+      "description": "Post a message to a Slack channel.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "channel": {
+            "type": "string",
+            "description": "The channel ID or name to post to."
+          },
+          "text": {
+            "type": "string",
+            "description": "The message text to post."
+          }
+        },
+        "required": ["channel", "text"]
+      }
+    },
+    {
+      "name": "slack_search_messages",
+      "description": "Search for messages in Slack matching a query string.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "The search query string."
+          },
+          "count": {
+            "type": "integer",
+            "description": "Number of results to return."
+          }
+        },
+        "required": ["query"]
+      }
+    },
+    {
+      "name": "slack_get_channel_history",
+      "description": "Retrieve recent messages (conversation history) from a Slack channel.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "channel": {
+            "type": "string",
+            "description": "The channel ID to fetch history for."
+          },
+          "limit": {
+            "type": "integer",
+            "description": "Maximum number of messages to return."
+          }
+        },
+        "required": ["channel"]
+      }
+    },
+    {
+      "name": "slack_get_thread",
+      "description": "Retrieve replies in a Slack message thread.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "channel": {
+            "type": "string",
+            "description": "The channel ID containing the thread."
+          },
+          "thread_ts": {
+            "type": "string",
+            "description": "The timestamp of the parent message."
+          }
+        },
+        "required": ["channel", "thread_ts"]
+      }
+    }
+  ],
+  "JiraAgent": [
+    {
+      "name": "jira_search_issues",
+      "description": "Search for Jira issues using JQL (Jira Query Language). Use this for any issue lookup including getting issue details by key.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "jql": {
+            "type": "string",
+            "description": "The JQL query string to search for issues."
+          },
+          "maxResults": {
+            "type": "integer",
+            "description": "Maximum number of results to return."
+          },
+          "fields": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "List of fields to include in results."
+          }
+        },
+        "required": ["jql"]
+      }
+    },
+    {
+      "name": "jira_list_projects",
+      "description": "List all Jira projects visible to the current user.",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "jira_list_statuses",
+      "description": "List all issue statuses available in the Jira instance.",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "jira_list_priorities",
+      "description": "List all priority levels available in the Jira instance.",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "jira_get_transitions",
+      "description": "Get available workflow transitions for a specific Jira issue.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "issueKey": {
+            "type": "string",
+            "description": "The issue key (e.g., SMS-5)."
+          }
+        },
+        "required": ["issueKey"]
+      }
+    },
+    {
+      "name": "jira_get_comments",
+      "description": "Get all comments on a specific Jira issue.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "issueKey": {
+            "type": "string",
+            "description": "The issue key (e.g., SMS-1)."
+          }
+        },
+        "required": ["issueKey"]
+      }
+    },
+    {
+      "name": "jira_get_worklogs",
+      "description": "Get work log entries for a specific Jira issue.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "issueKey": {
+            "type": "string",
+            "description": "The issue key (e.g., SMS-3)."
+          }
+        },
+        "required": ["issueKey"]
+      }
+    },
+    {
+      "name": "jira_get_project",
+      "description": "Get detailed information about a specific Jira project.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "projectKeyOrId": {
+            "type": "string",
+            "description": "The project key or numeric ID."
+          }
+        },
+        "required": ["projectKeyOrId"]
+      }
+    },
+    {
+      "name": "jira_list_sprints",
+      "description": "List all sprints for a given Jira board.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "boardId": {
+            "type": "integer",
+            "description": "The board ID to list sprints for."
+          },
+          "state": {
+            "type": "string",
+            "description": "Filter by sprint state: active, closed, future."
+          }
+        },
+        "required": ["boardId"]
+      }
+    },
+    {
+      "name": "jira_get_sprint",
+      "description": "Get details of a specific sprint by ID.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "sprintId": {
+            "type": "integer",
+            "description": "The sprint ID."
+          }
+        },
+        "required": ["sprintId"]
+      }
+    },
+    {
+      "name": "jira_get_board",
+      "description": "Get details of a specific Jira board.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "boardId": {
+            "type": "integer",
+            "description": "The board ID."
+          }
+        },
+        "required": ["boardId"]
+      }
+    },
+    {
+      "name": "jira_list_boards",
+      "description": "List all boards in the Jira instance.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "description": "Filter by board type: scrum, kanban."
+          },
+          "name": {
+            "type": "string",
+            "description": "Filter boards by name."
+          }
+        }
+      }
+    },
+    {
+      "name": "jira_get_issue_link_types",
+      "description": "List available issue link types (e.g., blocks, duplicates).",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "jira_link_issues",
+      "description": "Create a link between two Jira issues.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "inwardIssue": {
+            "type": "string",
+            "description": "The inward issue key."
+          },
+          "outwardIssue": {
+            "type": "string",
+            "description": "The outward issue key."
+          },
+          "linkType": {
+            "type": "string",
+            "description": "The type of link (e.g., Blocks, Duplicates)."
+          }
+        },
+        "required": ["inwardIssue", "outwardIssue", "linkType"]
+      }
+    },
+    {
+      "name": "jira_list_fields",
+      "description": "List all fields available in the Jira instance.",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "jira_get_field",
+      "description": "Get details of a specific Jira field.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "fieldId": {
+            "type": "string",
+            "description": "The field ID."
+          }
+        },
+        "required": ["fieldId"]
+      }
+    }
+  ],
+  "GitHubAgent": [
+    {
+      "name": "get_file_contents",
+      "description": "Get the contents of a file or directory from a GitHub repository.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "owner": {"type": "string", "description": "Repository owner."},
+          "repo": {"type": "string", "description": "Repository name."},
+          "path": {"type": "string", "description": "File or directory path."},
+          "ref": {"type": "string", "description": "Git ref (branch, tag, or SHA)."}
+        },
+        "required": ["owner", "repo", "path"]
+      }
+    },
+    {
+      "name": "search_repositories",
+      "description": "Search for GitHub repositories matching a query.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "query": {"type": "string", "description": "Search query string."},
+          "per_page": {"type": "integer", "description": "Results per page."}
+        },
+        "required": ["query"]
+      }
+    },
+    {
+      "name": "create_repository",
+      "description": "Create a new GitHub repository.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "name": {"type": "string", "description": "Repository name."},
+          "description": {"type": "string", "description": "Repository description."},
+          "private": {"type": "boolean", "description": "Whether the repository is private."}
+        },
+        "required": ["name"]
+      }
+    },
+    {
+      "name": "create_issue",
+      "description": "Create a new issue in a GitHub repository.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "owner": {"type": "string", "description": "Repository owner."},
+          "repo": {"type": "string", "description": "Repository name."},
+          "title": {"type": "string", "description": "Issue title."},
+          "body": {"type": "string", "description": "Issue body text."}
+        },
+        "required": ["owner", "repo", "title"]
+      }
+    },
+    {
+      "name": "list_issues",
+      "description": "List issues in a GitHub repository.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "owner": {"type": "string", "description": "Repository owner."},
+          "repo": {"type": "string", "description": "Repository name."},
+          "state": {"type": "string", "description": "Issue state: open, closed, all."}
+        },
+        "required": ["owner", "repo"]
+      }
+    },
+    {
+      "name": "list_pull_requests",
+      "description": "List pull requests in a GitHub repository.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "owner": {"type": "string", "description": "Repository owner."},
+          "repo": {"type": "string", "description": "Repository name."},
+          "state": {"type": "string", "description": "PR state: open, closed, all."}
+        },
+        "required": ["owner", "repo"]
+      }
+    },
+    {
+      "name": "create_pull_request",
+      "description": "Create a new pull request in a GitHub repository.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "owner": {"type": "string", "description": "Repository owner."},
+          "repo": {"type": "string", "description": "Repository name."},
+          "title": {"type": "string", "description": "PR title."},
+          "head": {"type": "string", "description": "Branch containing changes."},
+          "base": {"type": "string", "description": "Branch to merge into."},
+          "body": {"type": "string", "description": "PR description."}
+        },
+        "required": ["owner", "repo", "title", "head", "base"]
+      }
+    },
+    {
+      "name": "search_code",
+      "description": "Search for code across GitHub repositories.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "query": {"type": "string", "description": "Code search query."},
+          "per_page": {"type": "integer", "description": "Results per page."}
+        },
+        "required": ["query"]
+      }
+    },
+    {
+      "name": "search_issues",
+      "description": "Search for issues and pull requests across GitHub repositories.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "query": {"type": "string", "description": "Search query string."},
+          "per_page": {"type": "integer", "description": "Results per page."}
+        },
+        "required": ["query"]
+      }
+    },
+    {
+      "name": "search_users",
+      "description": "Search for GitHub users matching a query.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "query": {"type": "string", "description": "Search query string."},
+          "per_page": {"type": "integer", "description": "Results per page."}
+        },
+        "required": ["query"]
+      }
+    },
+    {
+      "name": "list_commits",
+      "description": "List commits on a branch or path in a GitHub repository.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "owner": {"type": "string", "description": "Repository owner."},
+          "repo": {"type": "string", "description": "Repository name."},
+          "sha": {"type": "string", "description": "Branch name or commit SHA."},
+          "per_page": {"type": "integer", "description": "Results per page."}
+        },
+        "required": ["owner", "repo"]
+      }
+    },
+    {
+      "name": "get_pull_request",
+      "description": "Get details of a specific pull request.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "owner": {"type": "string", "description": "Repository owner."},
+          "repo": {"type": "string", "description": "Repository name."},
+          "pull_number": {"type": "integer", "description": "Pull request number."}
+        },
+        "required": ["owner", "repo", "pull_number"]
+      }
+    },
+    {
+      "name": "get_pull_request_files",
+      "description": "List files changed in a pull request.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "owner": {"type": "string", "description": "Repository owner."},
+          "repo": {"type": "string", "description": "Repository name."},
+          "pull_number": {"type": "integer", "description": "Pull request number."}
+        },
+        "required": ["owner", "repo", "pull_number"]
+      }
+    },
+    {
+      "name": "create_branch",
+      "description": "Create a new branch in a GitHub repository.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "owner": {"type": "string", "description": "Repository owner."},
+          "repo": {"type": "string", "description": "Repository name."},
+          "ref": {"type": "string", "description": "New branch name."},
+          "sha": {"type": "string", "description": "SHA to branch from."}
+        },
+        "required": ["owner", "repo", "ref"]
+      }
+    },
+    {
+      "name": "fork_repository",
+      "description": "Fork a GitHub repository to your account.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "owner": {"type": "string", "description": "Repository owner."},
+          "repo": {"type": "string", "description": "Repository name."}
+        },
+        "required": ["owner", "repo"]
+      }
+    }
+  ]
+}

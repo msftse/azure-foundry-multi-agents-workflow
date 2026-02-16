@@ -56,6 +56,7 @@ The system supports both **local development** and **cloud deployment** as a hos
   - [Local Mode](#local-mode)
   - [Azure AI Foundry Deployment](#azure-ai-foundry-deployment)
   - [GitHub MCP Connection Setup](#github-mcp-connection-setup)
+- [Evaluation](#evaluation)
 - [Key Design Decisions](#key-design-decisions)
 - [Known Limitations](#known-limitations)
 - [Resources](#resources)
@@ -114,6 +115,11 @@ GitHub uses the hosted [GitHub Copilot MCP endpoint](https://docs.github.com/en/
 ├── main.py                        # Local entrypoint — interactive or single-task mode
 ├── pyproject.toml                 # Project metadata and dependencies
 ├── .env.example                   # Environment variable template
+│
+├── evaluation/                    # Agent evaluation suite
+│   ├── run_evaluation.py          # Evaluation runner (routing + tool call accuracy)
+│   ├── evaluation_data.jsonl      # 40 test cases across all agents
+│   └── tool_definitions.json      # MCP tool schemas for all agents
 │
 ├── pipeline/                      # Azure AI Foundry deployment
 │   ├── agents.py                  # Agent factories using native MCP tool definitions
@@ -251,6 +257,61 @@ az rest --method put \
 ```
 
 > **Note:** The `project_connection_id` field in the native MCP tool definition takes the connection **name** (e.g., `github-mcp-pat`), not the full ARM resource ID.
+
+## Evaluation
+
+The project includes an evaluation suite that uses the [Azure AI Evaluation SDK](https://learn.microsoft.com/azure/ai-foundry/how-to/develop/agent-evaluate-sdk) to measure agent quality:
+
+| Evaluator | What it measures |
+|-----------|-----------------|
+| `IntentResolutionEvaluator` | Does the Orchestrator correctly identify user intent and route to the right agent? |
+| `ToolCallAccuracyEvaluator` | Does the sub-agent select the correct MCP tools for the query? |
+
+### Install evaluation dependencies
+
+```bash
+pip install -e ".[eval]"
+```
+
+### Run evaluations
+
+```bash
+# Orchestrator routing + tool call accuracy (individual evaluators)
+python -m evaluation.run_evaluation
+
+# Orchestrator routing only
+python -m evaluation.run_evaluation --routing-only
+
+# Tool call accuracy only
+python -m evaluation.run_evaluation --tool-calls-only
+
+# Batch mode using SDK evaluate() function
+python -m evaluation.run_evaluation --batch
+
+# Log results to Azure AI Foundry
+python -m evaluation.run_evaluation --batch --log-to-foundry
+```
+
+### Evaluation dataset
+
+The dataset (`evaluation/evaluation_data.jsonl`) contains 40 test cases across four categories:
+
+| Category | Count | Description |
+|----------|-------|-------------|
+| Slack routing | 10 | Queries that should route to SlackAgent |
+| Jira routing | 12 | Queries that should route to JiraAgent |
+| GitHub routing | 12 | Queries that should route to GitHubAgent |
+| Multi-agent | 6 | Multi-step queries testing first-hop routing |
+
+Each test case specifies the expected agent and expected tool calls, enabling automated accuracy measurement.
+
+### Evaluation files
+
+| File | Description |
+|------|-------------|
+| `evaluation/evaluation_data.jsonl` | Test dataset with queries, expected agents, and expected tools |
+| `evaluation/tool_definitions.json` | Full tool schemas for all three MCP servers |
+| `evaluation/run_evaluation.py` | Evaluation runner script |
 
 ## Key Design Decisions
 
