@@ -265,17 +265,19 @@ az rest --method put \
 
 ## CI/CD
 
-The repository includes a GitHub Actions pipeline (`.github/workflows/ci-cd.yml`) that runs on every push to `main`:
+The repository includes a GitHub Actions pipeline (`.github/workflows/ci-cd.yml`) that automates linting, deployment, and evaluation:
 
 ```
 Lint  ──>  Deploy to Foundry  ──>  Evaluate Workflow
 ```
 
-| Stage | What it does |
-|-------|-------------|
-| **Lint** | Runs `ruff check` and `ruff format --check` |
-| **Deploy** | Registers agents & workflow in Foundry, deploys via ARM API, runs a smoke test |
-| **Evaluate** | Sends 40 queries to the live `MultiAgentGroupChat` agent and evaluates with built-in evaluators. Results appear under the workflow's **Evaluation** tab in the Foundry portal. |
+| Stage | Trigger | What it does |
+|-------|---------|-------------|
+| **Lint** | Push, PR, manual | Runs `ruff check` and `ruff format --check` |
+| **Deploy** | Push to `main`, manual | Registers agents & workflow in Foundry, deploys via ARM API, runs a smoke test |
+| **Evaluate** | Push to `main`, manual | Sends 40 queries to the live `MultiAgentGroupChat` agent and evaluates with built-in evaluators. Results appear under the workflow's **Evaluation** tab in the Foundry portal. Evaluation results are also uploaded as a GitHub Actions artifact. |
+
+> **Note:** On pull requests, only the Lint stage runs. Deploy and Evaluate require a push to `main` or a manual trigger.
 
 ### Required GitHub Secrets
 
@@ -298,9 +300,34 @@ Configure these in **Settings > Secrets and variables > Actions**:
 | `GH_PAT` | GitHub Personal Access Token for MCP auth |
 | `GH_MCP_URL` | GitHub Copilot MCP endpoint |
 
+### Service Principal Roles
+
+The service principal used for CI/CD needs the following roles on the **Cognitive Services account** that backs your Foundry project:
+
+| Role | Why |
+|------|-----|
+| **Contributor** | ARM-level operations (deploy workflow, manage resources) |
+| **Cognitive Services User** | Data-plane operations (`agents/write`, `agents/read`). Required because agent CRUD uses data actions under `Microsoft.CognitiveServices/accounts/AIServices/*`, which are not covered by Contributor or Azure AI Developer. |
+
+Assign them with:
+
+```bash
+# Contributor on the subscription (or scope to resource group)
+az role assignment create \
+  --assignee <service-principal-client-id> \
+  --role "Contributor" \
+  --scope /subscriptions/<subscription-id>
+
+# Cognitive Services User on the Cognitive Services account
+az role assignment create \
+  --assignee <service-principal-client-id> \
+  --role "Cognitive Services User" \
+  --scope /subscriptions/<subscription-id>/resourceGroups/<rg>/providers/Microsoft.CognitiveServices/accounts/<account>
+```
+
 ### Manual trigger
 
-You can also trigger the pipeline manually via **Actions > CI/CD > Run workflow**, with an option to skip the evaluation step.
+You can trigger the pipeline manually via **Actions > CI/CD > Run workflow**, with an option to skip the evaluation step.
 
 ## Evaluation
 
@@ -325,6 +352,14 @@ python -m evaluation.run_evaluation
 ```
 
 This sends each query to the live agent, collects responses (including tool calls), and evaluates them. The run is asynchronous in Azure — the script polls for completion and prints a summary.
+
+> **How it works:** The evaluation uses an [agent target](https://learn.microsoft.com/azure/ai-foundry/how-to/develop/cloud-evaluation?view=foundry) (`azure_ai_agent` target type), meaning queries are sent to the live deployed agent at runtime — not evaluated against pre-recorded responses. This is what makes results appear under the workflow's **Evaluation** tab rather than the project-level Evaluations sidebar.
+
+### Viewing results
+
+- **Foundry portal** — Open your workflow in Azure AI Foundry and go to the **Evaluation** tab to see per-query scores, pass rates, and detailed breakdowns.
+- **GitHub Actions** — Evaluation results are uploaded as a `evaluation-results` artifact on each pipeline run.
+- **CLI output** — The script prints a summary with per-evaluator pass rates and a direct link to the Foundry report.
 
 ### Evaluation dataset
 
