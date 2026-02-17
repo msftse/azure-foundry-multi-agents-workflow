@@ -1,0 +1,78 @@
+# Parallel fan-out / fan-in workflow for Azure AI Foundry.
+#
+# Flow:
+#   1. ParallelOrchestrator (routing) decides which agents to invoke
+#      → returns comma-separated names like "SlackAgent,JiraAgent"
+#   2. Each sub-agent is invoked IF its name appears in the routing response
+#      (3 separate ConditionGroup blocks so multiple agents can match)
+#   3. ParallelOrchestratorSynthesizer combines all results into a final answer
+
+kind: Workflow
+trigger:
+  kind: OnConversationStart
+  id: parallel_workflow
+  actions:
+    # === PHASE 1: ROUTING — decide which agents to invoke ===
+    - kind: InvokeAzureAgent
+      id: invoke_router
+      displayName: Routing Orchestrator
+      agent:
+        name: ParallelOrchestrator
+      conversationId: =System.ConversationId
+      output:
+        messages: Local.RoutingResponse
+
+    # === PHASE 2: FAN-OUT — invoke each selected agent ===
+
+    # Check & invoke Slack Agent
+    - kind: ConditionGroup
+      id: route_slack
+      displayName: Route to Slack
+      conditions:
+        - condition: =Not(IsBlank(Find("SlackAgent", MessageText(Local.RoutingResponse))))
+          id: slack_match
+          actions:
+            - kind: InvokeAzureAgent
+              id: invoke_slack
+              displayName: Slack Agent
+              agent:
+                name: SlackAgent
+              conversationId: =System.ConversationId
+
+    # Check & invoke Jira Agent
+    - kind: ConditionGroup
+      id: route_jira
+      displayName: Route to Jira
+      conditions:
+        - condition: =Not(IsBlank(Find("JiraAgent", MessageText(Local.RoutingResponse))))
+          id: jira_match
+          actions:
+            - kind: InvokeAzureAgent
+              id: invoke_jira
+              displayName: Jira Agent
+              agent:
+                name: JiraAgent
+              conversationId: =System.ConversationId
+
+    # Check & invoke GitHub Agent
+    - kind: ConditionGroup
+      id: route_github
+      displayName: Route to GitHub
+      conditions:
+        - condition: =Not(IsBlank(Find("GitHubAgent", MessageText(Local.RoutingResponse))))
+          id: github_match
+          actions:
+            - kind: InvokeAzureAgent
+              id: invoke_github
+              displayName: GitHub Agent
+              agent:
+                name: GitHubAgent
+              conversationId: =System.ConversationId
+
+    # === PHASE 3: FAN-IN — synthesize all results ===
+    - kind: InvokeAzureAgent
+      id: invoke_synthesizer
+      displayName: Synthesis Orchestrator
+      agent:
+        name: ParallelOrchestratorSynthesizer
+      conversationId: =System.ConversationId

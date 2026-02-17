@@ -64,7 +64,11 @@ The system supports both **local development** and **cloud deployment** as a hos
 
 ## Architecture
 
-The solution implements a hub-and-spoke orchestration pattern where a central Orchestrator agent analyzes user intent and delegates work to the appropriate specialized agent:
+The project supports two orchestration patterns that share the same agents and MCP tools:
+
+### Sequential (Group Chat)
+
+A hub-and-spoke pattern where the Orchestrator delegates to **one agent at a time** in a loop:
 
 ```
                                   ┌──────────────┐
@@ -81,19 +85,38 @@ The solution implements a hub-and-spoke orchestration pattern where a central Or
                                   └──────────────┘
 ```
 
+### Parallel (Fan-out / Fan-in)
+
+The Orchestrator selects **multiple agents at once**, they all execute, and a Synthesizer combines their results into a single final answer:
+
+```
+                              ┌──────────────┐
+                          ┌──>│  SlackAgent   │──┐
+                          │   └──────────────┘   │
+┌──────┐    ┌─────────┐  │   ┌──────────────┐   │   ┌──────────────┐
+│ User │───>│ Router  │──┼──>│  JiraAgent    │──┼──>│ Synthesizer  │───> Final Answer
+└──────┘    │(GPT-4o) │  │   └──────────────┘   │   │   (GPT-4o)   │
+            └─────────┘  │   ┌──────────────┐   │   └──────────────┘
+                          └──>│ GitHubAgent   │──┘
+                              └──────────────┘
+```
+
 | Mode | Entrypoint | How agents connect to MCP servers |
 |------|-----------|----------------------------------|
-| **Local** | `main.py` | Custom wrappers (`RawMCPSseTool`, `RawMCPStdioTool`) connect directly |
-| **Foundry** | `pipeline/publish.py` | Native MCP tool definitions (`type: "mcp"`) — Foundry runtime connects on the agent's behalf |
+| **Local (Sequential)** | `main.py` | Custom wrappers (`RawMCPSseTool`, `RawMCPStdioTool`) connect directly |
+| **Local (Parallel)** | `main_parallel.py` | Same wrappers, agents run concurrently via `asyncio.gather` |
+| **Foundry (Sequential)** | `pipeline/publish.py` | Native MCP tool definitions (`type: "mcp"`) — Foundry runtime connects on the agent's behalf |
+| **Foundry (Parallel)** | `pipeline/publish_parallel.py` | Same native MCP tools, fan-out via conditional agent invocation |
 
 ## Features
 
-- **Intent-based routing** — The Orchestrator analyzes each user message and delegates to the right agent
+- **Two orchestration patterns** — Sequential (group chat) for iterative multi-turn routing, and parallel (fan-out/fan-in) for concurrent multi-agent execution with synthesized results
+- **Intent-based routing** — The Orchestrator analyzes each user message and delegates to the right agent(s)
 - **Three specialized agents** — Slack, Jira, and GitHub, each with full MCP tool access
 - **Dual execution modes** — Run locally for development or deploy to Azure AI Foundry for production
 - **Native MCP integration** — Foundry-hosted agents use native MCP tool definitions for server-side tool execution
 - **Secure credential handling** — GitHub MCP auth via Foundry [project connections](https://learn.microsoft.com/azure/ai-studio/how-to/connections-add), not inline secrets
-- **Declarative workflow** — Foundry deployment uses a YAML workflow with conditional routing and looping
+- **Declarative workflow** — Foundry deployment uses YAML workflows with conditional routing
 
 ## MCP Tool Servers
 
@@ -113,7 +136,8 @@ GitHub uses the hosted [GitHub Copilot MCP endpoint](https://docs.github.com/en/
 
 ```
 .
-├── main.py                        # Local entrypoint — interactive or single-task mode
+├── main.py                        # Local entrypoint — sequential group chat
+├── main_parallel.py               # Local entrypoint — parallel fan-out/fan-in
 ├── pyproject.toml                 # Project metadata and dependencies
 ├── .env.example                   # Environment variable template
 │
@@ -127,20 +151,26 @@ GitHub uses the hosted [GitHub Copilot MCP endpoint](https://docs.github.com/en/
 │   └── tool_definitions.json      # MCP tool schemas for all agents
 │
 ├── pipeline/                      # Azure AI Foundry deployment
-│   ├── agents.py                  # Agent factories using native MCP tool definitions
-│   ├── publish.py                 # CLI: register, deploy, verify, and run workflows
-│   └── workflow.yaml              # Declarative workflow with conditional routing
+│   ├── agents.py                  # Agent factories — sequential workflow
+│   ├── publish.py                 # CLI: register/deploy/verify — sequential
+│   ├── workflow.yaml              # Declarative workflow — sequential routing
+│   ├── parallel_agents.py         # Agent factories — parallel workflow (Router + Synthesizer + 3 tool agents)
+│   ├── publish_parallel.py        # CLI: register/deploy/verify — parallel
+│   └── parallel_workflow.yaml     # Declarative workflow — fan-out via 3 ConditionGroups
 │
 └── src/                           # Core application code
     ├── config.py                  # Centralized configuration from .env
-    ├── workflow.py                # Programmatic GroupChat builder (local mode)
+    ├── workflow.py                # GroupChat builder (sequential, local mode)
+    ├── parallel_workflow.py       # Fan-out/fan-in builder (parallel, local mode)
     ├── prompts/                   # Agent names, instructions, and descriptions
-    │   ├── orchestrator.py
+    │   ├── orchestrator.py        # Sequential orchestrator prompt
+    │   ├── parallel_orchestrator.py # Router + Synthesizer prompts
     │   ├── slack.py
     │   ├── jira.py
     │   └── github.py
     ├── agents/                    # Local agent factories with MCP wrappers
-    │   ├── orchestrator.py
+    │   ├── orchestrator.py        # Sequential orchestrator factory
+    │   ├── parallel_orchestrator.py # Router + Synthesizer factories
     │   ├── slack_agent.py
     │   ├── jira_agent.py
     │   └── github_agent.py
@@ -197,7 +227,11 @@ Edit `.env` and fill in your values. See `.env.example` for the full list.
 
 ### Local Mode
 
-Run the multi-agent group chat locally. The orchestrator routes your request to the appropriate agent, which connects directly to the MCP server.
+Run the multi-agent system locally. Choose **sequential** (group chat) or **parallel** (fan-out/fan-in) mode.
+
+#### Sequential (Group Chat)
+
+The orchestrator routes your request to one agent at a time in a loop:
 
 ```bash
 # Interactive mode
@@ -209,25 +243,57 @@ python main.py "What Jira tickets are assigned to me?"
 python main.py "List my GitHub repositories"
 ```
 
-### Azure AI Foundry Deployment
+#### Parallel (Fan-out / Fan-in)
 
-Register agents and deploy the workflow to Azure AI Foundry as a hosted agent visible and runnable in the Foundry UI.
+The router selects multiple agents at once, they execute concurrently, and the synthesizer combines results:
 
 ```bash
-# Step 1: Register agents and workflow definition in Foundry
+# Interactive mode
+python main_parallel.py
+
+# Single task — multi-agent queries benefit most from parallel execution
+python main_parallel.py "List Slack channels and Jira projects"
+python main_parallel.py "Show my GitHub repos and recent Slack messages"
+```
+
+### Azure AI Foundry Deployment
+
+Register agents and deploy workflows to Azure AI Foundry as hosted agents visible in the Foundry UI.
+
+#### Sequential Workflow
+
+```bash
+# Register agents and workflow
 python -m pipeline.publish --register
 
-# Step 2: Deploy via ARM API (creates Application + AgentDeployment)
+# Deploy via ARM API
 python -m pipeline.publish --deploy
 
-# Step 3: Verify the deployed workflow responds
+# Verify the deployed workflow
 python -m pipeline.publish --verify
+```
+
+#### Parallel Workflow
+
+```bash
+# Register agents (Router, Synthesizer, 3 tool agents) and workflow
+python -m pipeline.publish_parallel --register
+
+# Deploy via ARM API
+python -m pipeline.publish_parallel --deploy
+
+# Verify the deployed workflow
+python -m pipeline.publish_parallel --verify
 ```
 
 You can also register agents in Foundry and run a task locally through the Foundry provider:
 
 ```bash
+# Sequential
 python -m pipeline.publish --run "Show my recent Slack messages"
+
+# Parallel
+python -m pipeline.publish_parallel --run "List Slack channels and Jira projects"
 ```
 
 ### GitHub MCP Connection Setup
@@ -389,6 +455,7 @@ The dataset (`evaluation/agent_eval_data.jsonl`) contains 40 queries across four
 | **Dual execution modes** | Local mode uses custom MCP wrappers (`RawMCPSseTool`, `RawMCPStdioTool`) for direct connections; Foundry mode uses native MCP tool definitions. Both share the same prompts and configuration. |
 | **Project connections for auth** | GitHub MCP auth uses a Foundry `CustomKeys` connection rather than inline headers, following Foundry's security model for sensitive credentials. |
 | **Declarative workflow YAML** | The Foundry deployment uses `ConditionGroup` for intent-based routing and `kind: If` with `GotoAction` for multi-round looping, keeping orchestration logic declarative and version-controlled. |
+| **Parallel fan-out/fan-in** | The parallel workflow uses a Router agent to select agents upfront, invokes them concurrently (locally via `asyncio.gather`, in Foundry via 3 independent `ConditionGroup` blocks), and a Synthesizer combines all results into a single comprehensive answer. Foundry YAML lacks a native parallel primitive, so independent `ConditionGroup` blocks simulate fan-out. |
 | **Centralized configuration** | All settings flow through a typed `Config` dataclass in `src/config.py`, loaded from `.env` via `load_config()`. |
 
 ## Known Limitations
