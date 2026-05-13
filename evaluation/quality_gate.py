@@ -147,9 +147,39 @@ def pass_rates_from_items(client, eval_id: str, run_id: str) -> dict[str, float]
       - for items with `passed = None` but a numeric `score`, apply the
         per-evaluator threshold in `SCORE_THRESHOLDS`.
     """
-    items_iter = client.evals.runs.output_items.list(eval_id=eval_id, run_id=run_id)
+    # Paginate explicitly — the openai SDK list call returns a single page.
+    all_items: list[Any] = []
+    after = None
+    while True:
+        page = client.evals.runs.output_items.list(
+            eval_id=eval_id, run_id=run_id, limit=100, after=after
+        )
+        data = list(getattr(page, "data", page) or [])
+        all_items.extend(data)
+        if not getattr(page, "has_more", False) or not data:
+            break
+        after = _get_attr(data[-1], "id")
+    print(f"  Fetched {len(all_items)} output_items")
+
+    # Diagnostic: enumerate every unique (name, has_passed, has_score, status)
+    # signature in the first 3 items so we can see exactly what the API returns
+    # for the missing evaluators.
+    seen: list[str] = []
+    for item in all_items[:3]:
+        for r in _get_attr(item, "results", []) or []:
+            sig = (
+                f"name={_get_attr(r, 'name')!r} "
+                f"passed={_get_attr(r, 'passed')!r} "
+                f"score={_get_attr(r, 'score')!r} "
+                f"status={_get_attr(r, 'status')!r} "
+                f"metric={_get_attr(r, 'metric')!r}"
+            )
+            if sig not in seen:
+                seen.append(sig)
+                print(f"    sample result: {sig}")
+
     stats: dict[str, dict[str, int]] = {}
-    for item in items_iter:
+    for item in all_items:
         for r in _get_attr(item, "results", []) or []:
             name = _get_attr(r, "name")
             if not name:
@@ -174,6 +204,9 @@ def pass_rates_from_items(client, eval_id: str, run_id: str) -> dict[str, float]
                 bucket["passed"] += 1
             else:
                 bucket["failed"] += 1
+
+    print(f"  Aggregated {len(stats)} unique evaluator name(s) from items: {sorted(stats.keys())}")
+
     rates: dict[str, float] = {}
     for name, s in stats.items():
         total = s["passed"] + s["failed"]
