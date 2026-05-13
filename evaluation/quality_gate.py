@@ -101,13 +101,28 @@ def latest_completed_run(client, eval_id: str):
     return runs[0]
 
 
-def pass_rates_from_run(run) -> dict[str, float]:
-    """Return {evaluator_name: pass_rate} from `run.per_testing_criteria_results`.
+# Score thresholds for continuous-scale evaluators (1-5 LLM-judge style).
+# An item is considered "passed" if its score is >= the threshold below.
+# Matches Foundry's default cut-off of 3 for the quality/agent evaluators.
+SCORE_THRESHOLDS: dict[str, float] = {
+    "intent_resolution": 3.0,
+    "task_adherence": 3.0,
+    "task_completion": 3.0,
+    "tool_call_accuracy": 3.0,
+    "tool_selection": 3.0,
+    "tool_call_success": 3.0,
+    "coherence": 3.0,
+    "fluency": 3.0,
+}
 
-    The openai evals API pre-aggregates pass/fail counts per testing criterion;
-    we just have to read them. The `testing_criteria` field carries the display
-    name the Action set (snake_case, e.g. "intent_resolution") — which matches
-    our THRESHOLDS keys.
+
+def pass_rates_from_per_criteria(run) -> dict[str, float]:
+    """Pass rates already binned by the Foundry API.
+
+    Only populated for evaluators with a built-in binary verdict (the four
+    safety evaluators and tool_selection in the current Action setup). The
+    LLM-judge / continuous-scale evaluators land in output_items as numeric
+    scores and have to be thresholded by hand (see `pass_rates_from_items`).
     """
     rates: dict[str, float] = {}
     per_criteria = _get_attr(run, "per_testing_criteria_results", []) or []
@@ -119,6 +134,62 @@ def pass_rates_from_run(run) -> dict[str, float]:
         if not name or total == 0:
             continue
         rates[name] = passed / total
+    return rates
+
+
+def pass_rates_from_items(client, eval_id: str, run_id: str) -> dict[str, float]:
+    """Pass rates computed from per-item Result objects.
+
+    For each item the Foundry API returns a list of Result entries, each with
+    `name`, `passed`, `score`, and `status`. We:
+      - skip errored results (`status == "error"`),
+      - count items with `passed = True/False` as binary,
+      - for items with `passed = None` but a numeric `score`, apply the
+        per-evaluator threshold in `SCORE_THRESHOLDS`.
+    """
+    items_iter = client.evals.runs.output_items.list(eval_id=eval_id, run_id=run_id)
+    stats: dict[str, dict[str, int]] = {}
+    for item in items_iter:
+        for r in _get_attr(item, "results", []) or []:
+            name = _get_attr(r, "name")
+            if not name:
+                continue
+            if _get_attr(r, "status") == "error":
+                continue
+            bucket = stats.setdefault(name, {"passed": 0, "failed": 0})
+            passed = _get_attr(r, "passed")
+            if passed is True:
+                bucket["passed"] += 1
+                continue
+            if passed is False:
+                bucket["failed"] += 1
+                continue
+            score = _get_attr(r, "score")
+            if score is None:
+                continue
+            cutoff = SCORE_THRESHOLDS.get(name)
+            if cutoff is None:
+                continue
+            if float(score) >= cutoff:
+                bucket["passed"] += 1
+            else:
+                bucket["failed"] += 1
+    rates: dict[str, float] = {}
+    for name, s in stats.items():
+        total = s["passed"] + s["failed"]
+        if total:
+            rates[name] = s["passed"] / total
+    return rates
+
+
+def pass_rates_combined(client, run, eval_id: str, run_id: str) -> dict[str, float]:
+    """Union of per_testing_criteria pass rates and item-derived pass rates.
+
+    `per_testing_criteria_results` wins when both sources have a value, since
+    that's the API's pre-binned source of truth.
+    """
+    rates = pass_rates_from_items(client, eval_id, run_id)
+    rates.update(pass_rates_from_per_criteria(run))
     return rates
 
 
@@ -165,36 +236,12 @@ def main() -> int:
     run = client.evals.runs.retrieve(run_id=run_id, eval_id=eval_id)
     print(f"  report : {_get_attr(run, 'report_url', '')}")
 
-    print("\nReading per-evaluator pass rates from run.per_testing_criteria_results...")
-    per_criteria = _get_attr(run, "per_testing_criteria_results", []) or []
-    print(f"  per_testing_criteria_results: {len(per_criteria)} entries")
-    for crit in per_criteria:
-        print(
-            f"    - testing_criteria={_get_attr(crit, 'testing_criteria')!r} "
-            f"passed={_get_attr(crit, 'passed')} failed={_get_attr(crit, 'failed')}"
-        )
-
-    # Also surface the run-level totals so we can see if results existed at all.
-    rc = _get_attr(run, "result_counts")
-    print(f"  result_counts: {rc!r}")
-
-    # And the testing criteria the evaluation was *created with* (the spec),
-    # to see if criteria themselves were dropped or if results just didn't
-    # come back.
-    eval_full = client.evals.retrieve(eval_id)
-    spec_criteria = _get_attr(eval_full, "testing_criteria", []) or []
-    print(f"  eval testing_criteria (spec): {len(spec_criteria)} entries")
-    for c in spec_criteria:
-        print(
-            f"    - name={_get_attr(c, 'name')!r} type={_get_attr(c, 'type')!r} "
-            f"evaluator_name={_get_attr(c, 'evaluator_name')!r}"
-        )
-
-    rates = pass_rates_from_run(run)
+    print("\nComputing pass rates (combined per-criteria + per-item with score thresholding)...")
+    rates = pass_rates_combined(client, run, eval_id, run_id)
     if not rates:
-        print("ERROR: run has no per_testing_criteria_results to evaluate.")
+        print("ERROR: no per-evaluator results returned by Foundry.")
         return 2
-    print(f"  Found {len(rates)} evaluator(s) in run with usable results.")
+    print(f"  Found {len(rates)} evaluator(s) with usable results.")
     print("=" * 70)
     print(f"QUALITY GATE — {len(rates)} evaluators × thresholds")
     print("=" * 70)
