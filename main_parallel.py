@@ -48,7 +48,7 @@ async def run(task: str, config: Config):
 
         print(f"\n{'=' * 60}")
         print(f"Task: {task}")
-        print(f"Mode: Parallel fan-out / fan-in")
+        print("Mode: Parallel fan-out / fan-in")
         print(f"{'=' * 60}\n")
 
         final_answer = await run_parallel_workflow(

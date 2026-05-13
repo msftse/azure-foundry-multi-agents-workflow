@@ -107,7 +107,7 @@ async def run_parallel_workflow(
     for agent_name, response in results:
         print(f"  [{agent_name}] responded ({len(response)} chars)")
 
-    print(f"\n--- Phase 3: Synthesis orchestrator combining results ---")
+    print("\n--- Phase 3: Synthesis orchestrator combining results ---")
 
     # --- Phase 3: Fan-in (synthesis) ---
     synthesis_prompt = _build_synthesis_prompt(task, results)
