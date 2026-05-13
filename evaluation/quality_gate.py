@@ -26,7 +26,6 @@ from __future__ import annotations
 import os
 import sys
 import time
-from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
@@ -102,25 +101,25 @@ def latest_completed_run(client, eval_id: str):
     return runs[0]
 
 
-def aggregate_results(client, eval_id: str, run_id: str) -> dict[str, dict[str, int]]:
-    """Iterate output items for a run, return {metric: {passed, failed}}."""
-    items_iter = client.evals.runs.output_items.list(eval_id=eval_id, run_id=run_id)
-    stats: dict[str, dict[str, int]] = defaultdict(lambda: {"passed": 0, "failed": 0})
-    for item in items_iter:
-        results = _get_attr(item, "results", []) or []
-        for r in results:
-            name = _get_attr(r, "name")
-            if not name:
-                continue
-            passed = _get_attr(r, "passed")
-            status = _get_attr(r, "status")
-            if status == "error":
-                continue
-            if passed is True:
-                stats[name]["passed"] += 1
-            elif passed is False:
-                stats[name]["failed"] += 1
-    return dict(stats)
+def pass_rates_from_run(run) -> dict[str, float]:
+    """Return {evaluator_name: pass_rate} from `run.per_testing_criteria_results`.
+
+    The openai evals API pre-aggregates pass/fail counts per testing criterion;
+    we just have to read them. The `testing_criteria` field carries the display
+    name the Action set (snake_case, e.g. "intent_resolution") — which matches
+    our THRESHOLDS keys.
+    """
+    rates: dict[str, float] = {}
+    per_criteria = _get_attr(run, "per_testing_criteria_results", []) or []
+    for crit in per_criteria:
+        name = _get_attr(crit, "testing_criteria")
+        passed = _get_attr(crit, "passed", 0) or 0
+        failed = _get_attr(crit, "failed", 0) or 0
+        total = passed + failed
+        if not name or total == 0:
+            continue
+        rates[name] = passed / total
+    return rates
 
 
 def append_summary(text: str) -> None:
@@ -156,24 +155,25 @@ def main() -> int:
     eval_id = _get_attr(eval_obj, "id")
     print(f"  eval id: {eval_id}")
 
-    run = latest_completed_run(client, eval_id)
-    run_id = _get_attr(run, "id")
+    run_summary = latest_completed_run(client, eval_id)
+    run_id = _get_attr(run_summary, "id")
     print(f"  run id : {run_id}")
-    print(f"  status : {_get_attr(run, 'status')}")
+    print(f"  status : {_get_attr(run_summary, 'status')}")
+
+    # Re-fetch the run to get per_testing_criteria_results, which list()
+    # endpoints sometimes omit. retrieve() always populates them.
+    run = client.evals.runs.retrieve(run_id=run_id, eval_id=eval_id)
     print(f"  report : {_get_attr(run, 'report_url', '')}")
 
-    print("\nAggregating per-evaluator pass rates...")
-    stats = aggregate_results(client, eval_id, run_id)
-
+    print("\nReading per-evaluator pass rates from run.per_testing_criteria_results...")
+    rates = pass_rates_from_run(run)
+    if not rates:
+        print("ERROR: run has no per_testing_criteria_results to evaluate.")
+        return 2
+    print(f"  Found {len(rates)} evaluator(s) in run.")
     print("=" * 70)
-    print(f"QUALITY GATE — {len(stats)} evaluators × thresholds")
+    print(f"QUALITY GATE — {len(rates)} evaluators × thresholds")
     print("=" * 70)
-
-    rates: dict[str, float] = {}
-    for metric, s in sorted(stats.items()):
-        total = s["passed"] + s["failed"]
-        rate = (s["passed"] / total) if total else 0.0
-        rates[metric] = rate
 
     violations: list[tuple[str, float, float]] = []
     missing: list[str] = []
