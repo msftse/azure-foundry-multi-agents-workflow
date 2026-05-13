@@ -10,7 +10,7 @@ Strategy:
   1. Connect to the Foundry project with `AIProjectClient` + the openai
      evals client (same pattern the Action itself uses).
   2. Find the most recent evaluation whose name matches our dataset
-     (`DATASET_NAME` — set by the JSON file the Action consumes).
+     (`EVAL_NAME` — set by the JSON file the Action consumes).
   3. Pull its latest run, list its output items.
   4. Aggregate pass/fail counts per evaluator metric.
   5. Compare each metric to its threshold; print a clear summary; exit
@@ -30,9 +30,12 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
-# Name of the eval, set in evaluation/agent-eval-dataset.json's "name" field.
-# We use this to find the latest run the Action just created.
-DATASET_NAME = "multi-agent-group-chat-eval"
+# The Action creates the evaluation with this fixed name in Foundry
+# (`evals.create(name="Agent Evaluation", ...)` in microsoft/ai-agent-evals).
+# We sort the matches by created_at and take the newest, which is the one
+# the Action just produced. The `name` field in our dataset JSON, by contrast,
+# only labels the *dataset* (the JSONL upload), not the evaluation object.
+EVAL_NAME = "Agent Evaluation"
 
 # ---------------------------------------------------------------------------
 # Production thresholds — change these to relax / tighten the gate.
@@ -83,7 +86,7 @@ def find_latest_eval(client, name: str, lookback: int = 30):
         if time.time() > deadline:
             raise RuntimeError(
                 f"No eval with name={name!r} found in last {lookback} evaluations. "
-                "Did the Action complete? Is DATASET_NAME in sync with the dataset JSON?"
+                "Did the Action complete? Is EVAL_NAME in sync with the dataset JSON?"
             )
         time.sleep(5)
 
@@ -148,8 +151,8 @@ def main() -> int:
     project_client = AIProjectClient(endpoint=endpoint, credential=DefaultAzureCredential())
     client = project_client.get_openai_client()
 
-    print(f"Locating most recent eval named {DATASET_NAME!r}...")
-    eval_obj = find_latest_eval(client, DATASET_NAME)
+    print(f"Locating most recent eval named {EVAL_NAME!r}...")
+    eval_obj = find_latest_eval(client, EVAL_NAME)
     eval_id = _get_attr(eval_obj, "id")
     print(f"  eval id: {eval_id}")
 
@@ -193,7 +196,7 @@ def main() -> int:
         md = ["\n## Quality Gate: FAIL\n\n"]
         md.append(
             f"{len(violations)} of {len(THRESHOLDS)} evaluator threshold(s) violated for "
-            f"agent run on `{DATASET_NAME}`.\n\n"
+            f"agent run on `{EVAL_NAME}`.\n\n"
         )
         if report_url:
             md.append(f"[View full report in Foundry portal]({report_url})\n\n")
