@@ -151,9 +151,7 @@ def pass_rates_from_items(client, eval_id: str, run_id: str) -> dict[str, float]
     all_items: list[Any] = []
     after = None
     while True:
-        page = client.evals.runs.output_items.list(
-            eval_id=eval_id, run_id=run_id, limit=100, after=after
-        )
+        page = client.evals.runs.output_items.list(eval_id=eval_id, run_id=run_id, limit=100, after=after)
         data = list(getattr(page, "data", page) or [])
         all_items.extend(data)
         if not getattr(page, "has_more", False) or not data:
