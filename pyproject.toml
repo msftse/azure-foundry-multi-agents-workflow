@@ -8,9 +8,12 @@ version = "0.1.0"
 description = "Multi-agent group chat POC using Microsoft Agent Framework with Slack, Jira, and GitHub MCP tools"
 requires-python = ">=3.10"
 dependencies = [
-    "agent-framework>=1.0.0b260212",
-    "agent-framework-azure-ai>=1.0.0b260212",
-    "agent-framework-orchestrations>=1.0.0b260212",
+    # Pinned to the last preview that exports AzureAIProjectAgentProvider.
+    # Newer releases renamed/removed that symbol; until the deploy code is
+    # updated for the new SDK shape, hold these three at the Feb 12 build.
+    "agent-framework==1.0.0b260212",
+    "agent-framework-azure-ai==1.0.0b260212",
+    "agent-framework-orchestrations==1.0.0b260212",
     "azure-identity>=1.17.0",
     "azure-ai-projects>=2.0.0b3",
     "python-dotenv>=1.0.0",
