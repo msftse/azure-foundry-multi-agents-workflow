@@ -37,20 +37,21 @@ TOOL_DEFINITIONS_PATH = EVAL_DIR / "tool_definitions.json"
 
 
 def _load_tool_definitions() -> list[dict]:
-    """Flatten per-agent tool defs into a single OpenAI function-calling list.
+    """Flatten per-agent tool defs into a single flat list.
 
     The cloud `builtin.tool_call_accuracy` evaluator requires a
-    `tool_definitions` data mapping. The schema is the OpenAI
-    function-calling shape: `[{"type": "function", "function": {...}}, ...]`.
-    Our `tool_definitions.json` stores raw function descriptors grouped by
-    agent name, so wrap each one before returning.
+    `tool_definitions` data mapping. Despite the OpenAI-style wrapping
+    suggested elsewhere, the Foundry evaluator validates each entry for a
+    top-level `name` field (it rejects `{"type": "function", "function": {...}}`
+    with `(UserError) Each tool definitions must contain a 'name' field`).
+    Our `tool_definitions.json` already stores raw function descriptors
+    grouped by agent name, so just flatten — no wrapping.
     """
     with open(TOOL_DEFINITIONS_PATH) as f:
         per_agent = json.load(f)
     tools: list[dict] = []
     for _, descriptors in per_agent.items():
-        for descriptor in descriptors:
-            tools.append({"type": "function", "function": descriptor})
+        tools.extend(descriptors)
     return tools
 
 
