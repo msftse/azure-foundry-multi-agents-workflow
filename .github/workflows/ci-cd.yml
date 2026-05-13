@@ -124,6 +124,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
       - name: Azure CLI login
         uses: azure/login@v2
         with:
@@ -138,8 +142,15 @@ jobs:
           data-path: ${{ github.workspace }}/evaluation/agent-eval-dataset.json
 
       # Quality gate — block the PR/merge when an evaluator regresses below
-      # its production threshold. Reads the Action's GitHub step summary and
-      # exits non-zero on any violation, which fails this job and the run.
+      # its production threshold. Queries Foundry directly for the eval the
+      # Action just created and exits non-zero on any violation, which fails
+      # this job and the run.
+      - name: Install quality-gate dependencies
+        if: always()
+        run: pip install --quiet "azure-ai-projects" "azure-identity"
+
       - name: Quality gate
         if: always()
+        env:
+          AZURE_AI_PROJECT_ENDPOINT: ${{ secrets.AZURE_AI_PROJECT_ENDPOINT }}
         run: python evaluation/quality_gate.py

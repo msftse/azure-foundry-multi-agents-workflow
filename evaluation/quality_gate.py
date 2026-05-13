@@ -1,23 +1,38 @@
 """Quality gate — fail the build if agent evaluation regresses below thresholds.
 
-Designed to run as a step right after `microsoft/ai-agent-evals@v3-beta` in
-the CI/CD workflow. The Action writes a Markdown summary with one row per
-evaluator (columns: Evaluation metric | Pass Rate | Passed/Total | Avg Score | ...).
-This script reads that summary from `$GITHUB_STEP_SUMMARY`, parses per-evaluator
-pass rates, compares them to `THRESHOLDS` below, and exits non-zero if any
-evaluator falls short — so the GitHub check (and any blocking PR rule) fails.
+Designed to run as a step right after `microsoft/ai-agent-evals@v3-beta`. The
+Action creates a fresh evaluation + run in Foundry and writes a rendered
+table to its OWN step summary file (`$GITHUB_STEP_SUMMARY` is per-step, not
+shared) — so this gate queries Foundry directly to compute pass rates from
+the run the Action just created.
 
-Tune `THRESHOLDS` to match your production quality bar. Safety evaluators are
-inverted by the Foundry API: a "pass" means the response was safe, so we want
-pass rates close to 1.0 for those too.
+Strategy:
+  1. Connect to the Foundry project with `AIProjectClient` + the openai
+     evals client (same pattern the Action itself uses).
+  2. Find the most recent evaluation whose name matches our dataset
+     (`DATASET_NAME` — set by the JSON file the Action consumes).
+  3. Pull its latest run, list its output items.
+  4. Aggregate pass/fail counts per evaluator metric.
+  5. Compare each metric to its threshold; print a clear summary; exit
+     non-zero on any violation so the job (and the PR check) fail.
+
+Tune `THRESHOLDS` to your production quality bar. Safety evaluators use the
+Foundry convention where "pass" means safe content, so a high pass rate is
+the goal there too.
 """
 
 from __future__ import annotations
 
 import os
-import re
 import sys
+import time
+from collections import defaultdict
 from pathlib import Path
+from typing import Any
+
+# Name of the eval, set in evaluation/agent-eval-dataset.json's "name" field.
+# We use this to find the latest run the Action just created.
+DATASET_NAME = "multi-agent-group-chat-eval"
 
 # ---------------------------------------------------------------------------
 # Production thresholds — change these to relax / tighten the gate.
@@ -42,92 +57,167 @@ THRESHOLDS: dict[str, float] = {
 }
 
 
-# Matches a markdown table row that begins with the metric cell. The first
-# cell is either `[metric_name](url)` (when the Action linked to the
-# evaluator catalog) or just `metric_name`. The second cell is "NN.N%".
-_ROW_RE = re.compile(
-    r"^\|\s*(?:\[)?([a-z_][a-z0-9_]*)(?:\]\([^)]+\))?\s*\|\s*([0-9]+(?:\.[0-9]+)?)\s*%\s*\|",
-    re.MULTILINE,
-)
+def _get_attr(obj: Any, name: str, default: Any = None) -> Any:
+    """Read `name` from a dict or an object indifferently."""
+    if isinstance(obj, dict):
+        return obj.get(name, default)
+    return getattr(obj, name, default)
 
 
-def parse_pass_rates(markdown: str) -> dict[str, float]:
-    """Return {evaluator_name: pass_rate_0to1} parsed from the Action summary."""
-    rates: dict[str, float] = {}
-    for name, pct in _ROW_RE.findall(markdown):
-        rates[name] = float(pct) / 100
-    return rates
+def find_latest_eval(client, name: str, lookback: int = 30):
+    """Return the most recent eval whose name matches `name`.
+
+    The openai evals API returns evals across the project; we filter client-side
+    by name and take the newest. A small `lookback` is enough because the Action
+    runs immediately before the gate.
+    """
+    deadline = time.time() + 60  # propagation safety: retry up to 60s
+    while True:
+        evals_iter = client.evals.list(limit=lookback)
+        # Some SDKs return an object with .data; some return an iterable.
+        evals = getattr(evals_iter, "data", None) or list(evals_iter)
+        matching = [e for e in evals if _get_attr(e, "name", "") == name]
+        if matching:
+            matching.sort(key=lambda e: _get_attr(e, "created_at", 0) or 0, reverse=True)
+            return matching[0]
+        if time.time() > deadline:
+            raise RuntimeError(
+                f"No eval with name={name!r} found in last {lookback} evaluations. "
+                "Did the Action complete? Is DATASET_NAME in sync with the dataset JSON?"
+            )
+        time.sleep(5)
 
 
-def _append_summary(path: Path, text: str) -> None:
-    with path.open("a") as f:
-        f.write(text)
+def latest_completed_run(client, eval_id: str):
+    """Return the most recent completed run for the given eval."""
+    runs_iter = client.evals.runs.list(eval_id=eval_id, limit=10)
+    runs = getattr(runs_iter, "data", None) or list(runs_iter)
+    runs = [r for r in runs if _get_attr(r, "status", "") == "completed"]
+    if not runs:
+        raise RuntimeError(f"No completed runs for eval {eval_id}")
+    runs.sort(key=lambda r: _get_attr(r, "created_at", 0) or 0, reverse=True)
+    return runs[0]
+
+
+def aggregate_results(client, eval_id: str, run_id: str) -> dict[str, dict[str, int]]:
+    """Iterate output items for a run, return {metric: {passed, failed}}."""
+    items_iter = client.evals.runs.output_items.list(eval_id=eval_id, run_id=run_id)
+    stats: dict[str, dict[str, int]] = defaultdict(lambda: {"passed": 0, "failed": 0})
+    for item in items_iter:
+        results = _get_attr(item, "results", []) or []
+        for r in results:
+            name = _get_attr(r, "name")
+            if not name:
+                continue
+            passed = _get_attr(r, "passed")
+            status = _get_attr(r, "status")
+            if status == "error":
+                continue
+            if passed is True:
+                stats[name]["passed"] += 1
+            elif passed is False:
+                stats[name]["failed"] += 1
+    return dict(stats)
+
+
+def append_summary(text: str) -> None:
+    """Write to GITHUB_STEP_SUMMARY if it exists (best-effort)."""
+    p = os.environ.get("GITHUB_STEP_SUMMARY")
+    if not p:
+        return
+    try:
+        Path(p).open("a").write(text)
+    except OSError:
+        pass
 
 
 def main() -> int:
-    summary_env = os.environ.get("GITHUB_STEP_SUMMARY")
-    if not summary_env:
-        print("ERROR: GITHUB_STEP_SUMMARY env var not set; nothing to gate on.")
-        return 2
-    summary_path = Path(summary_env)
-    if not summary_path.exists():
-        print(f"ERROR: {summary_path} does not exist; the eval step did not write a summary.")
-        return 2
-
-    markdown = summary_path.read_text(encoding="utf-8")
-    rates = parse_pass_rates(markdown)
-    if not rates:
-        print("ERROR: could not parse any evaluator pass rates from the step summary.")
-        print("First 1k chars of summary for debugging:")
-        print(markdown[:1000])
+    try:
+        from azure.ai.projects import AIProjectClient
+        from azure.identity import DefaultAzureCredential
+    except ImportError as exc:
+        print(f"ERROR: missing dependency: {exc}")
+        print("Install with: pip install azure-ai-projects azure-identity")
         return 2
 
+    endpoint = os.environ.get("AZURE_AI_PROJECT_ENDPOINT")
+    if not endpoint:
+        print("ERROR: AZURE_AI_PROJECT_ENDPOINT not set")
+        return 2
+
+    project_client = AIProjectClient(endpoint=endpoint, credential=DefaultAzureCredential())
+    client = project_client.get_openai_client()
+
+    print(f"Locating most recent eval named {DATASET_NAME!r}...")
+    eval_obj = find_latest_eval(client, DATASET_NAME)
+    eval_id = _get_attr(eval_obj, "id")
+    print(f"  eval id: {eval_id}")
+
+    run = latest_completed_run(client, eval_id)
+    run_id = _get_attr(run, "id")
+    print(f"  run id : {run_id}")
+    print(f"  status : {_get_attr(run, 'status')}")
+    print(f"  report : {_get_attr(run, 'report_url', '')}")
+
+    print("\nAggregating per-evaluator pass rates...")
+    stats = aggregate_results(client, eval_id, run_id)
+
     print("=" * 70)
-    print("QUALITY GATE — evaluator pass rates vs production thresholds")
+    print(f"QUALITY GATE — {len(stats)} evaluators × thresholds")
     print("=" * 70)
+
+    rates: dict[str, float] = {}
+    for metric, s in sorted(stats.items()):
+        total = s["passed"] + s["failed"]
+        rate = (s["passed"] / total) if total else 0.0
+        rates[metric] = rate
 
     violations: list[tuple[str, float, float]] = []
     missing: list[str] = []
-
     for metric, threshold in THRESHOLDS.items():
         actual = rates.get(metric)
         if actual is None:
             missing.append(metric)
-            print(f"  ?  {metric:22s}: not present in summary (skipped)")
+            print(f"  ?  {metric:22s}: not present in run (skipped)")
             continue
         ok = actual >= threshold
         marker = "OK " if ok else "FAIL"
         print(f"  {marker} {metric:22s}: {actual:6.1%}   (threshold {threshold:.0%})")
         if not ok:
             violations.append((metric, actual, threshold))
-
     print("=" * 70)
 
+    report_url = _get_attr(run, "report_url", "")
     if violations:
         print(f"FAIL: {len(violations)} evaluator(s) below threshold")
-        gate_md = ["\n## Quality Gate: FAIL\n\n"]
-        gate_md.append(f"{len(violations)} of {len(THRESHOLDS)} evaluator threshold(s) violated.\n\n")
-        gate_md.append("| Metric | Actual pass rate | Threshold | Delta |\n")
-        gate_md.append("|--------|------------------|-----------|-------|\n")
-        for metric, actual, threshold in violations:
-            delta = actual - threshold
-            gate_md.append(f"| `{metric}` | {actual:.1%} | {threshold:.0%} | {delta:+.1%} |\n")
-        gate_md.append(
-            "\nThresholds are defined in `evaluation/quality_gate.py`. "
-            "Either improve the agent (prompts, tools, instructions) and re-run, "
-            "or relax the threshold and re-run.\n"
+        md = ["\n## Quality Gate: FAIL\n\n"]
+        md.append(
+            f"{len(violations)} of {len(THRESHOLDS)} evaluator threshold(s) violated for "
+            f"agent run on `{DATASET_NAME}`.\n\n"
         )
-        _append_summary(summary_path, "".join(gate_md))
+        if report_url:
+            md.append(f"[View full report in Foundry portal]({report_url})\n\n")
+        md.append("| Metric | Actual pass rate | Threshold | Delta |\n")
+        md.append("|--------|------------------|-----------|-------|\n")
+        for metric, actual, threshold in violations:
+            md.append(f"| `{metric}` | {actual:.1%} | {threshold:.0%} | {actual - threshold:+.1%} |\n")
+        md.append(
+            "\nThresholds are defined in `evaluation/quality_gate.py`. Either improve the agent "
+            "(prompts, tools, instructions) and re-run, or relax the threshold and re-run.\n"
+        )
+        append_summary("".join(md))
         return 1
 
-    pass_md = ["\n## Quality Gate: PASS\n\n"]
-    pass_md.append(f"All {len(THRESHOLDS) - len(missing)} evaluator threshold(s) met.\n")
+    md = ["\n## Quality Gate: PASS\n\n"]
+    md.append(f"All {len(THRESHOLDS) - len(missing)} evaluator threshold(s) met.\n")
     if missing:
-        pass_md.append(
-            f"\n_Note: {len(missing)} configured evaluator(s) were not in the "
-            f"results and were skipped: {', '.join(missing)}_\n"
+        md.append(
+            f"\n_Note: {len(missing)} configured evaluator(s) were not in the run "
+            f"and were skipped: {', '.join(missing)}_\n"
         )
-    _append_summary(summary_path, "".join(pass_md))
+    if report_url:
+        md.append(f"\n[View full report in Foundry portal]({report_url})\n")
+    append_summary("".join(md))
     print("PASS: all evaluators met their thresholds")
     return 0
 
