@@ -166,11 +166,35 @@ def main() -> int:
     print(f"  report : {_get_attr(run, 'report_url', '')}")
 
     print("\nReading per-evaluator pass rates from run.per_testing_criteria_results...")
+    per_criteria = _get_attr(run, "per_testing_criteria_results", []) or []
+    print(f"  per_testing_criteria_results: {len(per_criteria)} entries")
+    for crit in per_criteria:
+        print(
+            f"    - testing_criteria={_get_attr(crit, 'testing_criteria')!r} "
+            f"passed={_get_attr(crit, 'passed')} failed={_get_attr(crit, 'failed')}"
+        )
+
+    # Also surface the run-level totals so we can see if results existed at all.
+    rc = _get_attr(run, "result_counts")
+    print(f"  result_counts: {rc!r}")
+
+    # And the testing criteria the evaluation was *created with* (the spec),
+    # to see if criteria themselves were dropped or if results just didn't
+    # come back.
+    eval_full = client.evals.retrieve(eval_id)
+    spec_criteria = _get_attr(eval_full, "testing_criteria", []) or []
+    print(f"  eval testing_criteria (spec): {len(spec_criteria)} entries")
+    for c in spec_criteria:
+        print(
+            f"    - name={_get_attr(c, 'name')!r} type={_get_attr(c, 'type')!r} "
+            f"evaluator_name={_get_attr(c, 'evaluator_name')!r}"
+        )
+
     rates = pass_rates_from_run(run)
     if not rates:
         print("ERROR: run has no per_testing_criteria_results to evaluate.")
         return 2
-    print(f"  Found {len(rates)} evaluator(s) in run.")
+    print(f"  Found {len(rates)} evaluator(s) in run with usable results.")
     print("=" * 70)
     print(f"QUALITY GATE — {len(rates)} evaluators × thresholds")
     print("=" * 70)
