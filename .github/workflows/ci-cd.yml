@@ -45,6 +45,11 @@ jobs:
     needs: lint
     runs-on: ubuntu-latest
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    outputs:
+      # Surfaced to the evaluate job so it can target the exact version
+      # we just registered (e.g. "MultiAgentGroupChat:20").
+      agent_id: ${{ steps.deploy.outputs.agent_id }}
+      agent_version: ${{ steps.deploy.outputs.agent_version }}
     env:
       AZURE_AI_PROJECT_ENDPOINT: ${{ secrets.AZURE_AI_PROJECT_ENDPOINT }}
       AZURE_OPENAI_ENDPOINT: ${{ secrets.AZURE_OPENAI_ENDPOINT }}
@@ -74,13 +79,38 @@ jobs:
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
+      # Run the deploy command, surface the output, and expose the freshly
+      # registered workflow version (e.g. "20") as a step output so the
+      # downstream evaluate job can target the exact version we just deployed.
       - name: Register agents & deploy workflow
-        run: python -m pipeline.publish --deploy
+        id: deploy
+        run: |
+          set -o pipefail
+          python -m pipeline.publish --deploy | tee deploy.log
+          version="$(grep -oE 'Registered workflow MultiAgentGroupChat:[0-9]+' deploy.log \
+                      | tail -1 | sed -E 's/.*://')"
+          if [ -z "$version" ]; then
+            echo "::error::Could not parse workflow version from deploy output"
+            exit 1
+          fi
+          echo "agent_id=MultiAgentGroupChat:${version}" >> "$GITHUB_OUTPUT"
+          echo "agent_version=${version}" >> "$GITHUB_OUTPUT"
+          echo "Deployed agent: MultiAgentGroupChat:${version}"
 
       - name: Verify deployment
         run: python -m pipeline.publish --verify
 
   # ─── Stage 3: Evaluate the deployed workflow ───────────────
+  # Uses the official Microsoft `ai-agent-evals` GitHub Action, which:
+  #   • sends each query in evaluation/agent-eval-dataset.json to the live
+  #     agent we just deployed,
+  #   • applies all evaluators listed in that dataset (intent, task adherence,
+  #     tool call accuracy, safety, etc.),
+  #   • publishes results to the workflow's Evaluation tab in Foundry,
+  #   • writes a rich summary (confidence intervals + statistical comparison)
+  #     to the GitHub Actions run summary.
+  #
+  # Docs: https://learn.microsoft.com/azure/foundry/how-to/evaluation-github-action
   evaluate:
     name: Evaluate Workflow
     needs: deploy
@@ -88,33 +118,21 @@ jobs:
     if: |
       (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
       && !(github.event.inputs.skip_eval == 'true')
-    env:
-      AZURE_AI_PROJECT_ENDPOINT: ${{ secrets.AZURE_AI_PROJECT_ENDPOINT }}
-      AZURE_OPENAI_ENDPOINT: ${{ secrets.AZURE_OPENAI_ENDPOINT }}
-      AZURE_OPENAI_API_KEY: ${{ secrets.AZURE_OPENAI_API_KEY }}
-      AZURE_OPENAI_CHAT_DEPLOYMENT_NAME: ${{ secrets.AZURE_OPENAI_CHAT_DEPLOYMENT_NAME }}
+    permissions:
+      id-token: write
+      contents: read
     steps:
       - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-
-      - name: Install dependencies
-        run: pip install -e ".[eval]"
 
       - name: Azure CLI login
         uses: azure/login@v2
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-      - name: Run agent evaluation
-        run: python -m evaluation.run_evaluation
-
-      - name: Upload evaluation results
-        if: always()
-        uses: actions/upload-artifact@v4
+      - name: Run Microsoft AI Agent Evaluation
+        uses: microsoft/ai-agent-evals@v3-beta
         with:
-          name: evaluation-results
-          path: evaluation/agent_eval_results.json
-          if-no-files-found: ignore
+          azure-ai-project-endpoint: ${{ secrets.AZURE_AI_PROJECT_ENDPOINT }}
+          deployment-name: ${{ secrets.AZURE_AI_MODEL_DEPLOYMENT_NAME }}
+          agent-ids: ${{ needs.deploy.outputs.agent_id }}
+          data-path: ${{ github.workspace }}/evaluation/agent-eval-dataset.json

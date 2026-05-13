@@ -340,10 +340,12 @@ Lint  ──>  Deploy to Foundry  ──>  Evaluate Workflow
 | Stage | Trigger | What it does |
 |-------|---------|-------------|
 | **Lint** | Push, PR, manual | Runs `ruff check` and `ruff format --check` |
-| **Deploy** | Push to `main`, manual | Registers agents & workflow in Foundry, deploys via ARM API, runs a smoke test |
-| **Evaluate** | Push to `main`, manual | Sends 40 queries to the live `MultiAgentGroupChat` agent and evaluates with built-in evaluators. Results appear under the workflow's **Evaluation** tab in the Foundry portal. Evaluation results are also uploaded as a GitHub Actions artifact. |
+| **Deploy** | Push to `main`, manual | Registers agents & workflow in Foundry, deploys via ARM API, runs a smoke test. The deploy step exposes the freshly registered agent version (e.g. `MultiAgentGroupChat:21`) as a job output. |
+| **Evaluate** | Push to `main`, manual | Runs the official [`microsoft/ai-agent-evals`](https://github.com/microsoft/ai-agent-evals) GitHub Action against the version just deployed. Results land in two places: the workflow's **Evaluation** tab in Foundry, and the **GitHub Actions run summary** with confidence intervals and (when multiple agent versions are passed) pairwise statistical comparison. |
 
 > **Note:** On pull requests, only the Lint stage runs. Deploy and Evaluate require a push to `main` or a manual trigger.
+
+> **Why the official Action?** The `microsoft/ai-agent-evals` Action is the canonical Microsoft path for evaluating Foundry agents in CI/CD — it handles dataset upload, the `azure_ai_agent` target, evaluator wiring (including auto-mapping `tool_definitions` for tool-call evaluators), polling, and report rendering for you. See [Run evaluations in GitHub Actions](https://learn.microsoft.com/azure/foundry/how-to/evaluation-github-action) on Microsoft Learn.
 
 ### Required GitHub Secrets
 
@@ -397,55 +399,83 @@ You can trigger the pipeline manually via **Actions > CI/CD > Run workflow**, wi
 
 ## Evaluation
 
-The project includes an evaluation suite that sends queries to the live **MultiAgentGroupChat** workflow agent and evaluates its responses using the [Foundry cloud evaluation API](https://learn.microsoft.com/azure/ai-foundry/how-to/develop/cloud-evaluation?view=foundry). Results appear under the workflow's **Evaluation** tab in the Foundry portal.
+The project ships two ways to evaluate the deployed **MultiAgentGroupChat** workflow. Both target the live agent through the [Foundry cloud evaluation API](https://learn.microsoft.com/azure/foundry/how-to/develop/cloud-evaluation) and publish results to the workflow's **Evaluation** tab in the Foundry portal.
 
-| Evaluator | What it measures |
-|-----------|-----------------|
-| `intent_resolution` | Does the agent correctly identify user intent and produce a meaningful response? |
-| `tool_call_accuracy` | Does the agent select the correct MCP tools for the query? |
-| `task_adherence` | Does the agent's response adhere to its assigned tasks? |
+| Path | Use when | How |
+|------|----------|-----|
+| **Official GitHub Action** (recommended in CI/CD) | Running evals on every push / PR / nightly schedule | [`microsoft/ai-agent-evals`](https://learn.microsoft.com/azure/foundry/how-to/evaluation-github-action) — driven by `evaluation/agent-eval-dataset.json` |
+| **Python SDK script** (recommended for local dev) | Iterating on evaluator config, exploring the cloud-evaluation SDK | `python -m evaluation.run_evaluation` |
 
-### Install evaluation dependencies
+### Evaluators
+
+The CI/CD dataset (`evaluation/agent-eval-dataset.json`) wires up twelve built-in evaluators that together give a production-readiness signal:
+
+| Category | Evaluator | What it measures |
+|----------|-----------|-----------------|
+| Agent behavior | `builtin.intent_resolution` | Does the agent identify the user's intent? |
+| Agent behavior | `builtin.task_adherence` | Does the response adhere to the agent's assigned task? |
+| Agent behavior | `builtin.task_completion` | Did the agent complete the task end-to-end? |
+| Tool usage | `builtin.tool_call_accuracy` | Did the agent call the right MCP tools with correct parameters? |
+| Tool usage | `builtin.tool_selection` | Did the agent select the necessary tool(s) at all? |
+| Tool usage | `builtin.tool_call_success` | Did tool calls succeed without technical errors? |
+| Quality | `builtin.coherence` | Is the response logically coherent? |
+| Quality | `builtin.fluency` | Is the response well-written? |
+| Safety | `builtin.violence`, `builtin.hate_unfairness`, `builtin.self_harm`, `builtin.sexual` | Does the agent emit unsafe content? |
+
+### Path 1 — Official Microsoft Action (CI/CD)
+
+The workflow already wires this up. Each push to `main` runs the official Action against the version just deployed and renders a summary table in the GitHub Actions run:
+
+```yaml
+- name: Run Microsoft AI Agent Evaluation
+  uses: microsoft/ai-agent-evals@v3-beta
+  with:
+    azure-ai-project-endpoint: ${{ secrets.AZURE_AI_PROJECT_ENDPOINT }}
+    deployment-name: ${{ secrets.AZURE_AI_MODEL_DEPLOYMENT_NAME }}
+    agent-ids: ${{ needs.deploy.outputs.agent_id }}    # e.g. MultiAgentGroupChat:21
+    data-path: ${{ github.workspace }}/evaluation/agent-eval-dataset.json
+```
+
+The Action handles dataset upload, evaluator wiring (including auto-mapping `tool_definitions` for tool-call evaluators), polling, and rendering. To compare two versions side-by-side with statistical significance testing, pass them comma-separated:
+
+```yaml
+agent-ids: "MultiAgentGroupChat:20,MultiAgentGroupChat:21"
+```
+
+### Path 2 — Python SDK script (local dev)
 
 ```bash
 pip install -e ".[eval]"
-```
-
-### Run evaluations
-
-```bash
 python -m evaluation.run_evaluation
 ```
 
-This sends each query to the live agent, collects responses (including tool calls), and evaluates them. The run is asynchronous in Azure — the script polls for completion and prints a summary.
-
-> **How it works:** The evaluation uses an [agent target](https://learn.microsoft.com/azure/ai-foundry/how-to/develop/cloud-evaluation?view=foundry) (`azure_ai_agent` target type), meaning queries are sent to the live deployed agent at runtime — not evaluated against pre-recorded responses. This is what makes results appear under the workflow's **Evaluation** tab rather than the project-level Evaluations sidebar.
+`evaluation/run_evaluation.py` is a self-contained example of the underlying [`azure-ai-projects` cloud-evaluation SDK](https://learn.microsoft.com/azure/foundry/how-to/develop/cloud-evaluation) — it creates an `azure_ai_target_completions` data source with an `azure_ai_agent` target, attaches three evaluators (`intent_resolution`, `tool_call_accuracy`, `task_adherence`), polls for completion, and saves detailed results to `evaluation/agent_eval_results.json`. Use this as a reference when you need fine-grained control the Action doesn't expose (custom evaluator parameters, the `azure_ai_responses` flow for evaluating past responses by ID, etc.).
 
 ### Viewing results
 
-- **Foundry portal** — Open your workflow in Azure AI Foundry and go to the **Evaluation** tab to see per-query scores, pass rates, and detailed breakdowns.
-- **GitHub Actions** — Evaluation results are uploaded as a `evaluation-results` artifact on each pipeline run.
-- **CLI output** — The script prints a summary with per-evaluator pass rates and a direct link to the Foundry report.
+- **Foundry portal** — Open your workflow in [Foundry](https://ai.azure.com) and go to the **Evaluation** tab.
+- **GitHub Actions summary** — The Action posts a per-evaluator score table with confidence intervals directly under the workflow run.
 
 ### Evaluation dataset
 
-The dataset (`evaluation/agent_eval_data.jsonl`) contains 40 queries across four categories:
+40 queries across four categories:
 
-| Category | Count | Description |
-|----------|-------|-------------|
-| Slack | 10 | Queries that should route to SlackAgent |
-| Jira | 12 | Queries that should route to JiraAgent |
-| GitHub | 12 | Queries that should route to GitHubAgent |
+| Category | Count | Routing target |
+|----------|-------|----------------|
+| Slack | 10 | SlackAgent |
+| Jira | 12 | JiraAgent |
+| GitHub | 12 | GitHubAgent |
 | Multi-agent | 6 | Multi-step queries testing first-hop routing |
 
 ### Evaluation files
 
 | File | Description |
 |------|-------------|
-| `evaluation/agent_eval_data.jsonl` | Query-only dataset (agent generates responses at runtime) |
-| `evaluation/evaluation_data.jsonl` | Full dataset with expected agents, tools, and arguments |
+| `evaluation/agent-eval-dataset.json` | CI/CD dataset consumed by `microsoft/ai-agent-evals` (queries + evaluator list) |
+| `evaluation/agent_eval_data.jsonl` | Query-only dataset used by the Python SDK script |
+| `evaluation/evaluation_data.jsonl` | Full dataset with expected agents, tools, and arguments (for offline analysis) |
 | `evaluation/tool_definitions.json` | MCP tool schemas for all three agents |
-| `evaluation/run_evaluation.py` | Agent target evaluation runner |
+| `evaluation/run_evaluation.py` | Cloud-evaluation SDK example (Path 2) |
 
 ## Key Design Decisions
 
