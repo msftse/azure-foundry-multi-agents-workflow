@@ -176,15 +176,19 @@ def pass_rates_from_items(client, eval_id: str, run_id: str) -> dict[str, float]
                 seen.append(sig)
                 print(f"    sample result: {sig}")
 
+    # Track errored results separately. An evaluator with only errors is a
+    # red flag — usually a misconfigured judge deployment. Treat that as
+    # 0% pass rate so the gate fails loudly instead of silently skipping.
     stats: dict[str, dict[str, int]] = {}
     for item in all_items:
         for r in _get_attr(item, "results", []) or []:
             name = _get_attr(r, "name")
             if not name:
                 continue
+            bucket = stats.setdefault(name, {"passed": 0, "failed": 0, "errored": 0})
             if _get_attr(r, "status") == "error":
+                bucket["errored"] += 1
                 continue
-            bucket = stats.setdefault(name, {"passed": 0, "failed": 0})
             passed = _get_attr(r, "passed")
             if passed is True:
                 bucket["passed"] += 1
@@ -204,12 +208,19 @@ def pass_rates_from_items(client, eval_id: str, run_id: str) -> dict[str, float]
                 bucket["failed"] += 1
 
     print(f"  Aggregated {len(stats)} unique evaluator name(s) from items: {sorted(stats.keys())}")
+    for n, s in sorted(stats.items()):
+        print(f"    {n}: passed={s['passed']} failed={s['failed']} errored={s['errored']}")
 
     rates: dict[str, float] = {}
     for name, s in stats.items():
         total = s["passed"] + s["failed"]
+        errored = s["errored"]
         if total:
             rates[name] = s["passed"] / total
+        elif errored:
+            # Every result for this evaluator errored. Surface this as 0%
+            # so the threshold check fails (and the operator investigates).
+            rates[name] = 0.0
     return rates
 
 

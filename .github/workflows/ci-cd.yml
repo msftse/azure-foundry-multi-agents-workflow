@@ -133,11 +133,18 @@ jobs:
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
+      # `deployment-name` is the LLM-judge model. It must be a deployment that
+      # exists in the *Foundry project* (Models + endpoints). The bespoke SDK
+      # script in evaluation/run_evaluation.py uses AZURE_OPENAI_CHAT_DEPLOYMENT_NAME
+      # and its judge calls succeed; pointing the Action at the same secret keeps
+      # both paths working off one source of truth and avoids the silent
+      # per-item judge errors we hit when AZURE_AI_MODEL_DEPLOYMENT_NAME was
+      # set to a name the Foundry project didn't recognise.
       - name: Run Microsoft AI Agent Evaluation
         uses: microsoft/ai-agent-evals@v3-beta
         with:
           azure-ai-project-endpoint: ${{ secrets.AZURE_AI_PROJECT_ENDPOINT }}
-          deployment-name: ${{ secrets.AZURE_AI_MODEL_DEPLOYMENT_NAME }}
+          deployment-name: ${{ secrets.AZURE_OPENAI_CHAT_DEPLOYMENT_NAME }}
           agent-ids: ${{ needs.deploy.outputs.agent_id }}
           data-path: ${{ github.workspace }}/evaluation/agent-eval-dataset.json
 
