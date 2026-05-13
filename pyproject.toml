@@ -15,7 +15,9 @@ dependencies = [
     "agent-framework-azure-ai==1.0.0b260212",
     "agent-framework-orchestrations==1.0.0b260212",
     "azure-identity>=1.17.0",
-    "azure-ai-projects>=2.0.0b3",
+    # Pinned: 2.0.0b4+ removed ResponseTextFormatConfigurationJsonObject,
+    # which agent-framework==1.0.0b260212 still imports. Hold at 2.0.0b3.
+    "azure-ai-projects==2.0.0b3",
     "python-dotenv>=1.0.0",
     "httpx>=0.27.0",
     "mcp>=1.0.0",
@@ -24,7 +26,7 @@ dependencies = [
 [project.optional-dependencies]
 eval = [
     "azure-ai-evaluation>=1.0.0",
-    "azure-ai-projects>=2.0.0b1",
+    "azure-ai-projects==2.0.0b3",
 ]
 dev = [
     "pytest>=8.0",
