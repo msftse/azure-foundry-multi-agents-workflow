@@ -341,7 +341,7 @@ Lint  ──>  Deploy to Foundry  ──>  Evaluate Workflow
 |-------|---------|-------------|
 | **Lint** | Push, PR, manual | Runs `ruff check` and `ruff format --check` |
 | **Deploy** | Push to `main`, manual | Registers agents & workflow in Foundry, deploys via ARM API, runs a smoke test. The deploy step exposes the freshly registered agent version (e.g. `MultiAgentGroupChat:21`) as a job output. |
-| **Evaluate** | Push to `main`, manual | Runs the official [`microsoft/ai-agent-evals`](https://github.com/microsoft/ai-agent-evals) GitHub Action against the version just deployed. Results land in two places: the workflow's **Evaluation** tab in Foundry, and the **GitHub Actions run summary** with confidence intervals and (when multiple agent versions are passed) pairwise statistical comparison. |
+| **Evaluate** | Push to `main`, manual | Runs the official [`microsoft/ai-agent-evals`](https://github.com/microsoft/ai-agent-evals) GitHub Action against the version just deployed. Results land in two places: the workflow's **Evaluation** tab in Foundry, and the **GitHub Actions run summary** with confidence intervals and (when multiple agent versions are passed) pairwise statistical comparison. A **quality-gate** step then parses the rendered scores and fails the run when any evaluator falls below the production thresholds in `evaluation/quality_gate.py` — so a regressed agent blocks the PR. |
 
 > **Note:** On pull requests, only the Lint stage runs. Deploy and Evaluate require a push to `main` or a manual trigger.
 
@@ -441,6 +441,18 @@ The Action handles dataset upload, evaluator wiring (including auto-mapping `too
 ```yaml
 agent-ids: "MultiAgentGroupChat:20,MultiAgentGroupChat:21"
 ```
+
+#### Quality gate — block regressions
+
+The Action reports scores but does **not** fail the job on low scores. The repo ships `evaluation/quality_gate.py` which parses the Action's GitHub step summary, applies per-evaluator thresholds, and exits non-zero on any regression. Wire it into the workflow right after the Action:
+
+```yaml
+- name: Quality gate
+  if: always()
+  run: python evaluation/quality_gate.py
+```
+
+Edit the `THRESHOLDS` dict in `quality_gate.py` to match your production bar (defaults: 70 % pass rate for behavior/tool evaluators, 80–90 % for response quality, 95 % for the four safety evaluators). When the gate fails, the job — and the PR check — fail, and the markdown summary gets a "Quality Gate: FAIL" table with the offending metrics and deltas so reviewers see immediately what regressed.
 
 ### Path 2 — Python SDK script (local dev)
 

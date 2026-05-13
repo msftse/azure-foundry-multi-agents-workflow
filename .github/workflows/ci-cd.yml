@@ -136,3 +136,10 @@ jobs:
           deployment-name: ${{ secrets.AZURE_AI_MODEL_DEPLOYMENT_NAME }}
           agent-ids: ${{ needs.deploy.outputs.agent_id }}
           data-path: ${{ github.workspace }}/evaluation/agent-eval-dataset.json
+
+      # Quality gate — block the PR/merge when an evaluator regresses below
+      # its production threshold. Reads the Action's GitHub step summary and
+      # exits non-zero on any violation, which fails this job and the run.
+      - name: Quality gate
+        if: always()
+        run: python evaluation/quality_gate.py
