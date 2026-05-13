@@ -33,6 +33,42 @@ load_dotenv()
 # ---------------------------------------------------------------------------
 EVAL_DIR = Path(__file__).parent
 AGENT_EVAL_DATA_PATH = EVAL_DIR / "agent_eval_data.jsonl"
+TOOL_DEFINITIONS_PATH = EVAL_DIR / "tool_definitions.json"
+
+
+def _load_tool_definitions() -> list[dict]:
+    """Flatten per-agent tool defs into a single OpenAI function-calling list.
+
+    The cloud `builtin.tool_call_accuracy` evaluator requires a
+    `tool_definitions` data mapping. The schema is the OpenAI
+    function-calling shape: `[{"type": "function", "function": {...}}, ...]`.
+    Our `tool_definitions.json` stores raw function descriptors grouped by
+    agent name, so wrap each one before returning.
+    """
+    with open(TOOL_DEFINITIONS_PATH) as f:
+        per_agent = json.load(f)
+    tools: list[dict] = []
+    for _, descriptors in per_agent.items():
+        for descriptor in descriptors:
+            tools.append({"type": "function", "function": descriptor})
+    return tools
+
+
+def _build_dataset_with_tools(source_path: Path, tools: list[dict], out_path: Path) -> int:
+    """Copy `source_path` to `out_path`, injecting a `tool_definitions` field
+    into every row. Returns the number of rows written."""
+    count = 0
+    with open(source_path) as f_in, open(out_path, "w") as f_out:
+        for line in f_in:
+            line = line.strip()
+            if not line:
+                continue
+            row = json.loads(line)
+            row["tool_definitions"] = tools
+            f_out.write(json.dumps(row) + "\n")
+            count += 1
+    return count
+
 
 # ---------------------------------------------------------------------------
 # Config
@@ -76,6 +112,10 @@ def run_agent_target_evaluation():
         rows = [json.loads(line) for line in f if line.strip()]
     print(f"Queries  : {len(rows)}")
 
+    # ── Load + flatten tool definitions ──────────────────────────
+    tools = _load_tool_definitions()
+    print(f"Tools    : {len(tools)} (OpenAI function-calling format)")
+
     # ── Connect ──────────────────────────────────────────────────
     print("\nConnecting to Azure AI Foundry...")
     credential = DefaultAzureCredential()
@@ -83,12 +123,16 @@ def run_agent_target_evaluation():
     client = project_client.get_openai_client()
     print("  Connected.")
 
-    # ── Upload dataset ───────────────────────────────────────────
+    # ── Build + upload augmented dataset (query + tool_definitions) ──
     ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    augmented_path = EVAL_DIR / f"agent_eval_data_with_tools_{ts}.jsonl"
+    row_count = _build_dataset_with_tools(AGENT_EVAL_DATA_PATH, tools, augmented_path)
+    print(f"  Wrote augmented dataset: {augmented_path.name} ({row_count} rows)")
+
     dataset = project_client.datasets.upload_file(
         name=f"agent-eval-{ts}",
         version="1",
-        file_path=str(AGENT_EVAL_DATA_PATH),
+        file_path=str(augmented_path),
     )
     data_id = dataset.id
     print(f"  Uploaded dataset: {data_id}")
@@ -102,6 +146,7 @@ def run_agent_target_evaluation():
             "type": "object",
             "properties": {
                 "query": {"type": "string"},
+                "tool_definitions": {"type": "array"},
             },
             "required": ["query"],
         },
@@ -130,6 +175,7 @@ def run_agent_target_evaluation():
             "data_mapping": {
                 "query": "{{item.query}}",
                 "response": "{{sample.output_items}}",
+                "tool_definitions": "{{item.tool_definitions}}",
             },
         },
         {
